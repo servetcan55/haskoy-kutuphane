@@ -6,6 +6,8 @@ export const metadata = {
   description: 'Hasköy Ortaokulu Kütüphane ve Envanter Takip Sistemi',
   icons: {
     icon: '/favicon.ico',
+    shortcut: '/favicon.ico',
+    apple: '/favicon.ico',
   },
 };
 
