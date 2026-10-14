@@ -7,12 +7,13 @@ import { supabase } from '../../lib/supabase';
 export default function AddBookPage() {
   const router = useRouter();
 
+  const [demirbasNo, setDemirbasNo] = useState(''); // Demirbaş No State'i
   const [isbn, setIsbn] = useState('');
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [publisher, setPublisher] = useState('');
   const [shelfLocation, setShelfLocation] = useState('');
-  const [category, setCategory] = useState('Roman'); // Kitap Türü State'i
+  const [category, setCategory] = useState('Roman');
   const [pageCount, setPageCount] = useState('');
   const [availableCopies, setAvailableCopies] = useState(1);
   const [coverUrl, setCoverUrl] = useState('');
@@ -78,6 +79,7 @@ export default function AddBookPage() {
 
     const { error } = await supabase.from('books').insert([
       {
+        demirbas_no: demirbasNo.trim(),
         isbn: isbn.trim(),
         title: title.trim(),
         author: author.trim(),
@@ -112,7 +114,7 @@ export default function AddBookPage() {
             <span className="text-xs font-mono text-slate-400">Yeni Eser</span>
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Yeni Kitap Kaydı</h1>
-          <p className="text-xs text-slate-400">ISBN taratarak otomatik doldurun veya künye bilgilerini manuel ekleyin</p>
+          <p className="text-xs text-slate-400">Demirbaş numarası ve ISBN taratarak envantere yeni eser ekleyin</p>
         </div>
 
         <Link
@@ -200,16 +202,30 @@ export default function AddBookPage() {
 
           {/* Sağ: Kitap Künye Alanları */}
           <div className="flex-1 w-full space-y-4">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">Kitap Adı *</label>
-              <input
-                type="text"
-                placeholder="Örn: Küçük Prens"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full p-3 bg-slate-50/70 border border-slate-200 rounded-2xl text-xs text-slate-900 outline-none focus:border-blue-500 focus:bg-white transition"
-                required
-              />
+            {/* Demirbaş Numarası ve Kitap Adı */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">🏷️ Demirbaş No</label>
+                <input
+                  type="text"
+                  placeholder="Örn: 2026-050"
+                  value={demirbasNo}
+                  onChange={(e) => setDemirbasNo(e.target.value)}
+                  className="w-full p-3 bg-slate-50/70 border border-slate-200 rounded-2xl text-xs text-slate-900 outline-none focus:border-blue-500 focus:bg-white font-mono transition"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">Kitap Adı *</label>
+                <input
+                  type="text"
+                  placeholder="Örn: Küçük Prens"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full p-3 bg-slate-50/70 border border-slate-200 rounded-2xl text-xs text-slate-900 outline-none focus:border-blue-500 focus:bg-white transition"
+                  required
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -270,7 +286,7 @@ export default function AddBookPage() {
               </div>
             </div>
 
-            {/* Sayfa Sayısı - Stok (2'li Grid) */}
+            {/* Sayfa Sayısı - Stok */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">📄 Sayfa Sayısı</label>

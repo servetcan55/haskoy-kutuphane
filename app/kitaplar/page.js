@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase';
 export default function KitaplarPage() {
   const [books, setBooks] = useState([]);
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState('demirbas_asc'); // Sıralama state'i (Varsayılan: Demirbaş No Artan)
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [message, setMessage] = useState({ text: '', type: '' });
@@ -13,6 +14,7 @@ export default function KitaplarPage() {
   // Düzenleme Modalı State'leri
   const [editingBook, setEditingBook] = useState(null);
   const [editForm, setEditForm] = useState({
+    demirbas_no: '',
     title: '',
     author: '',
     publisher: '',
@@ -76,6 +78,7 @@ export default function KitaplarPage() {
   const openEditModal = (book) => {
     setEditingBook(book);
     setEditForm({
+      demirbas_no: book.demirbas_no || '',
       title: book.title || '',
       author: book.author || '',
       publisher: book.publisher || '',
@@ -96,6 +99,7 @@ export default function KitaplarPage() {
     const { error } = await supabase
       .from('books')
       .update({
+        demirbas_no: editForm.demirbas_no.trim(),
         title: editForm.title.trim(),
         author: editForm.author.trim(),
         publisher: editForm.publisher.trim(),
@@ -118,13 +122,28 @@ export default function KitaplarPage() {
     setSaving(false);
   };
 
+  // Filtreleme ve Sıralama Mantığı
   const filteredBooks = books.filter((b) =>
     b.title?.toLowerCase().includes(search.toLowerCase()) ||
     b.author?.toLowerCase().includes(search.toLowerCase()) ||
     b.isbn?.includes(search) ||
+    b.demirbas_no?.toLowerCase().includes(search.toLowerCase()) ||
     b.shelf_location?.toLowerCase().includes(search.toLowerCase()) ||
     b.category?.toLowerCase().includes(search.toLowerCase())
-  );
+  ).sort((a, b) => {
+    if (sortBy === 'demirbas_asc') {
+      return (a.demirbas_no || '').localeCompare(b.demirbas_no || '', 'tr', { numeric: true });
+    } else if (sortBy === 'demirbas_desc') {
+      return (b.demirbas_no || '').localeCompare(a.demirbas_no || '', 'tr', { numeric: true });
+    } else if (sortBy === 'title_asc') {
+      return (a.title || '').localeCompare(b.title || '', 'tr');
+    } else if (sortBy === 'newest') {
+      return b.id - a.id;
+    } else if (sortBy === 'oldest') {
+      return a.id - b.id;
+    }
+    return 0;
+  });
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto antialiased">
@@ -168,7 +187,7 @@ export default function KitaplarPage() {
         </div>
       )}
 
-      {/* Modern Bento Arama & Hızlı Filtre Barı */}
+      {/* Modern Bento Arama & Sıralama Barı */}
       <div className="bg-white/80 backdrop-blur-md p-4 rounded-2xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row justify-between items-center gap-3">
         <div className="relative w-full sm:w-96">
           <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 text-sm">
@@ -176,15 +195,33 @@ export default function KitaplarPage() {
           </span>
           <input
             type="text"
-            placeholder="Kitap adı, yazar, tür, raf veya ISBN ile ara..."
+            placeholder="Demirbaş no, kitap adı, yazar, tür veya ISBN ile ara..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-9 pr-4 py-2.5 bg-slate-50/80 border border-slate-200 rounded-xl text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition"
           />
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-auto text-xs text-slate-400 font-mono">
-          <span>Gösterilen: <strong className="text-slate-700">{filteredBooks.length}</strong> eser</span>
+        {/* Sıralama Seçenekleri Dropdown */}
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-slate-500">Sırala:</span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="bg-slate-50/80 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition font-medium cursor-pointer"
+            >
+              <option value="demirbas_asc">🏷️ Demirbaş No (Artan)</option>
+              <option value="demirbas_desc">🏷️ Demirbaş No (Azalan)</option>
+              <option value="title_asc">📖 Kitap Adına Göre (A-Z)</option>
+              <option value="newest">✨ En Yeni Eklenen</option>
+              <option value="oldest">📜 En Eski Eklenen</option>
+            </select>
+          </div>
+
+          <span className="text-xs text-slate-400 font-mono hidden md:inline">
+            (<strong className="text-slate-700">{filteredBooks.length}</strong> eser)
+          </span>
         </div>
       </div>
 
@@ -223,6 +260,11 @@ export default function KitaplarPage() {
                         <h3 className="font-bold text-slate-900 text-sm truncate group-hover:text-blue-600 transition">
                           {b.title}
                         </h3>
+                        {b.demirbas_no && (
+                          <span className="font-mono text-[10px] bg-sky-50 text-sky-700 px-2 py-0.5 rounded font-bold border border-sky-100">
+                            🏷️ {b.demirbas_no}
+                          </span>
+                        )}
                         <span className="font-mono text-[10px] text-slate-400 font-bold">
                           #{b.id}
                         </span>
@@ -303,15 +345,28 @@ export default function KitaplarPage() {
             </div>
 
             <form onSubmit={handleUpdateBook} className="space-y-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">Kitap Adı</label>
-                <input
-                  type="text"
-                  value={editForm.title}
-                  onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                  className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition"
-                  required
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">🏷️ Demirbaş No</label>
+                  <input
+                    type="text"
+                    placeholder="Örn: 2026-050"
+                    value={editForm.demirbas_no}
+                    onChange={(e) => setEditForm({ ...editForm, demirbas_no: e.target.value })}
+                    className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition font-mono"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">Kitap Adı *</label>
+                  <input
+                    type="text"
+                    value={editForm.title}
+                    onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                    className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -361,7 +416,7 @@ export default function KitaplarPage() {
                     type="text"
                     value={editForm.isbn}
                     onChange={(e) => setEditForm({ ...editForm, isbn: e.target.value })}
-                    className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition"
+                    className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition font-mono"
                   />
                 </div>
               </div>
@@ -407,7 +462,7 @@ export default function KitaplarPage() {
                   placeholder="https://..."
                   value={editForm.cover_url}
                   onChange={(e) => setEditForm({ ...editForm, cover_url: e.target.value })}
-                  className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition"
+                  className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition font-mono"
                 />
               </div>
 
