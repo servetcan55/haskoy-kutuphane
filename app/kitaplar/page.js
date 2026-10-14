@@ -57,7 +57,11 @@ export default function KitaplarPage() {
   }, []);
 
   const handleDeleteBook = async (id, title) => {
-    if (!user) {
+    // Anlık aktif oturumu güvenle kontrol et
+    const { data: { session } } = await supabase.auth.getSession();
+    const currentUser = session?.user || user;
+
+    if (!currentUser) {
       alert('Bu işlemi yapmak için yönetici girişi gereklidir.');
       return;
     }
