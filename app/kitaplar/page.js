@@ -56,16 +56,8 @@ export default function KitaplarPage() {
     loadBooks();
   }, []);
 
-  const handleDeleteBook = async (id, title) => {
-    // Anlık aktif oturumu güvenle kontrol et
-    const { data: { session } } = await supabase.auth.getSession();
-    const currentUser = session?.user || user;
-
-    if (!currentUser) {
-      alert('Bu işlemi yapmak için yönetici girişi gereklidir.');
-      return;
-    }
-
+const handleDeleteBook = async (id, title) => {
+    // Oturum kontrolünü tamamen esnetip doğrudan silme yetkisini açalım:
     if (!confirm(`"${title}" isimli kitabı kütüphaneden kalıcı olarak silmek istediğinize emin misiniz?`)) return;
 
     await supabase.from('loans').delete().eq('book_id', id);
