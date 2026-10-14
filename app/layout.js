@@ -18,10 +18,10 @@ export default function RootLayout({ children }) {
   return (
     <html lang="tr">
       <head>
-        <title>Hasköy Ortaokulu Kütüphane Otomasyonu</title>
-        <meta name="description" content="Hasköy Ortaokulu Kütüphane ve Envanter Takip Sistemi" />
-        <link rel="icon" href="/favicon.ico" />
-      </head>
+  <title>Hasköy Ortaokulu Kütüphane Otomasyonu</title>
+  <meta name="description" content="Hasköy Ortaokulu Kütüphane ve Envanter Takip Sistemi" />
+  <link rel="icon" href="/favicon.ico" />
+</head>
       <body className="bg-slate-50 text-slate-800 min-h-screen antialiased">
         {isPublicPage ? (
           // Halka açık sayfalar (Tam ekran, Sidebar yok)
