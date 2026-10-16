@@ -159,7 +159,7 @@ export default function KitaplarPage() {
     setSaving(false);
   };
 
-  // Filtreleme ve Sıralama Mantığı
+  // Filtreleme ve Sıralama Mantığı (Demirbaş numarası olmayanlar otomatik olarak en alta atılır)
   const filteredBooks = books.filter((b) =>
     b.title?.toLowerCase().includes(search.toLowerCase()) ||
     b.author?.toLowerCase().includes(search.toLowerCase()) ||
@@ -169,9 +169,24 @@ export default function KitaplarPage() {
     b.category?.toLowerCase().includes(search.toLowerCase())
   ).sort((a, b) => {
     if (sortBy === 'demirbas_asc') {
-      return (a.demirbas_no || '').localeCompare(b.demirbas_no || '', 'tr', { numeric: true });
+      const aNo = (a.demirbas_no || '').trim();
+      const bNo = (b.demirbas_no || '').trim();
+      
+      // Demirbaş numarası olmayanları en alta gönder
+      if (!aNo && bNo) return 1;
+      if (aNo && !bNo) return -1;
+      if (!aNo && !bNo) return 0;
+
+      return aNo.localeCompare(bNo, 'tr', { numeric: true });
     } else if (sortBy === 'demirbas_desc') {
-      return (b.demirbas_no || '').localeCompare(a.demirbas_no || '', 'tr', { numeric: true });
+      const aNo = (a.demirbas_no || '').trim();
+      const bNo = (b.demirbas_no || '').trim();
+      
+      if (!aNo && bNo) return 1;
+      if (aNo && !bNo) return -1;
+      if (!aNo && !bNo) return 0;
+
+      return bNo.localeCompare(aNo, 'tr', { numeric: true });
     } else if (sortBy === 'title_asc') {
       return (a.title || '').localeCompare(b.title || '', 'tr');
     } else if (sortBy === 'newest') {
