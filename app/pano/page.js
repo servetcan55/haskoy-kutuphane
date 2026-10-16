@@ -240,8 +240,9 @@ export default function LibraryKioskPage() {
   // Supabase Verilerini Yükleme
   const loadKioskData = async () => {
     try {
-      const [booksRes, studentsRes, loansRes, goalRes, pageGoalRes, quotesRes, scheduleRes] = await Promise.all([
-        supabase.from('books').select('*').order('id', { ascending: false }),
+      const [booksCountRes, booksRes, studentsRes, loansRes, goalRes, pageGoalRes, quotesRes, scheduleRes] = await Promise.all([
+        supabase.from('books').select('*', { count: 'exact', head: true }), // <-- 2576+ toplam kitap sayısını tam alır
+        supabase.from('books').select('*').limit(100),
         supabase.from('students').select('*'),
         supabase.from('loans').select(`
           id, student_id, book_id, return_date, loan_date, status,
@@ -282,6 +283,7 @@ export default function LibraryKioskPage() {
         }
       }
 
+      const totalBookCount = booksCountRes.count ?? (booksRes.data?.length || 0);
       const books = booksRes.data || [];
       const students = studentsRes.data || [];
       const loans = loansRes.data || [];
@@ -394,7 +396,7 @@ export default function LibraryKioskPage() {
       }
 
       setStats({
-        totalBooks: books.length,
+        totalBooks: totalBookCount, // <-- Gerçek toplam sayı (2576+)
         totalStudents: students.length,
         monthlyRead: monthlyCompleted.length,
         termRead: termCompleted.length,

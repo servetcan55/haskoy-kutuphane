@@ -55,147 +55,177 @@ export default function DashboardPage() {
     if (!user) return;
     setLoading(true);
 
-    const [booksRes, studentsRes, loansRes] = await Promise.all([
-      supabase.from('books').select('id, title, author, cover_url, available_copies, page_count'),
-      supabase.from('students').select('id, student_number, full_name, grade_class, gender, photo_url'),
-      supabase.from('loans').select(`
-        id,
-        loan_date,
-        due_date,
-        return_date,
-        status,
-        student_id,
-        book_id,
-        books:book_id ( id, title, author, cover_url, available_copies, page_count ),
-        students:student_id ( id, full_name, student_number, grade_class, gender, photo_url )
-      `).order('id', { ascending: false }),
-    ]);
+    try {
+      // 1000 kayıt sınırını aşarak tüm kitapları (2576+) döngüyle çekiyoruz
+      let allBooks = [];
+      let step = 1000;
+      let from = 0;
+      let to = 999;
+      let keepFetching = true;
 
-    const books = booksRes.data || [];
-    const students = studentsRes.data || [];
-    const loans = loansRes.data || [];
+      while (keepFetching) {
+        const { data, error } = await supabase
+          .from('books')
+          .select('id, title, author, cover_url, available_copies, page_count')
+          .range(from, to);
 
-    const isReturned = (status) => {
-      if (!status) return false;
-      const s = String(status).toLowerCase();
-      return (s.includes('iade') || s.includes('return')) && !s.includes('kayıp');
-    };
+        if (error) throw error;
 
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-
-    const active = loans.filter((l) => !isReturned(l.status));
-    const overdue = active.filter((l) => l.due_date && new Date(l.due_date) < now);
-
-    const pendingList = active
-      .map((loan) => {
-        let diffDays = null;
-        if (loan.due_date) {
-          const due = new Date(loan.due_date);
-          due.setHours(0, 0, 0, 0);
-          diffDays = Math.ceil((due - now) / (1000 * 60 * 60 * 24));
-        }
-        return { ...loan, diffDays };
-      })
-      .filter((loan) => loan.diffDays !== null && loan.diffDays <= 3)
-      .sort((a, b) => a.diffDays - b.diffDays);
-
-    setImpendingReturns(pendingList);
-
-    const periodCompletedLoans = loans.filter(
-      (l) => isReturned(l.status) && matchesPeriod(l.return_date || l.loan_date, period)
-    );
-
-    // Toplam fiziksel kitap (kopya) sayısını hesapla (Çeşit yerine toplam adetler)
-    const totalPhysicalBooks = books.reduce((sum, b) => sum + (Number(b.available_copies) || 1), 0);
-
-    setStats({
-      totalBooks: totalPhysicalBooks,
-      totalStudents: students.length,
-      activeLoans: active.length,
-      overdueLoans: overdue.length,
-      periodCompleted: periodCompletedLoans.length,
-    });
-
-    setRecentActivities(loans.slice(0, 6));
-
-    const monthlyReturned = loans.filter((l) => isReturned(l.status) && matchesPeriod(l.return_date || l.loan_date, 'month'));
-    const termReturned = loans.filter((l) => isReturned(l.status) && matchesPeriod(l.return_date || l.loan_date, 'term'));
-
-    const calculateRankings = (returnedLoans) => {
-      const studentMap = {};
-      const classMap = {};
-
-      returnedLoans.forEach((l) => {
-        const sId = l.student_id;
-        const pages = Number(l.books?.page_count) || 0;
-
-        if (!studentMap[sId]) {
-          studentMap[sId] = { bookCount: 0, pageCount: 0 };
-        }
-        studentMap[sId].bookCount += 1;
-        studentMap[sId].pageCount += pages;
-
-        const st = students.find((s) => String(s.id) === String(sId));
-        const grade = st?.grade_class?.trim();
-        if (grade) {
-          if (!classMap[grade]) {
-            classMap[grade] = { bookCount: 0, pageCount: 0 };
+        if (data && data.length > 0) {
+          allBooks = [...allBooks, ...data];
+          if (data.length < step) {
+            keepFetching = false;
+          } else {
+            from += step;
+            to += step;
           }
-          classMap[grade].bookCount += 1;
-          classMap[grade].pageCount += pages;
+        } else {
+          keepFetching = false;
         }
-      });
+      }
 
-      const studentList = Object.entries(studentMap).map(([sId, data]) => {
-        const found = students.find((s) => String(s.id) === String(sId));
-        return { ...found, bookCount: data.bookCount, pageCount: data.pageCount };
-      });
+      const [studentsRes, loansRes] = await Promise.all([
+        supabase.from('students').select('id, student_number, full_name, grade_class, gender, photo_url'),
+        supabase.from('loans').select(`
+          id,
+          loan_date,
+          due_date,
+          return_date,
+          status,
+          student_id,
+          book_id,
+          books:book_id ( id, title, author, cover_url, available_copies, page_count ),
+          students:student_id ( id, full_name, student_number, grade_class, gender, photo_url )
+        `).order('id', { ascending: false }),
+      ]);
 
-      const topStudentsBooks = [...studentList]
-        .sort((a, b) => b.bookCount - a.bookCount || b.pageCount - a.pageCount)
-        .slice(0, 3);
+      const books = allBooks;
+      const students = studentsRes.data || [];
+      const loans = loansRes.data || [];
 
-      const topStudentsPages = [...studentList]
-        .sort((a, b) => b.pageCount - a.pageCount || b.bookCount - a.bookCount)
-        .slice(0, 3);
-
-      const classList = Object.entries(classMap).map(([name, data]) => ({
-        name,
-        bookCount: data.bookCount,
-        pageCount: data.pageCount,
-      }));
-
-      const topClassesBooks = [...classList]
-        .sort((a, b) => b.bookCount - a.bookCount || b.pageCount - a.pageCount)
-        .slice(0, 3);
-
-      const topClassesPages = [...classList]
-        .sort((a, b) => b.pageCount - a.pageCount || b.bookCount - a.bookCount)
-        .slice(0, 3);
-
-      return {
-        topStudentsBooks,
-        topStudentsPages,
-        topClassesBooks,
-        topClassesPages,
+      const isReturned = (status) => {
+        if (!status) return false;
+        const s = String(status).toLowerCase();
+        return (s.includes('iade') || s.includes('return')) && !s.includes('kayıp');
       };
-    };
 
-    const monthRanks = calculateRankings(monthlyReturned);
-    const termRanks = calculateRankings(termReturned);
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
 
-    setLeaders({
-      monthTopStudentsBooks: monthRanks.topStudentsBooks,
-      monthTopStudentsPages: monthRanks.topStudentsPages,
-      monthTopClassesBooks: monthRanks.topClassesBooks,
-      monthTopClassesPages: monthRanks.topClassesPages,
-      termTopStudentsBooks: termRanks.topStudentsBooks,
-      termTopStudentsPages: termRanks.topStudentsPages,
-      termTopClassesBooks: termRanks.topClassesBooks,
-      termTopClassesPages: termRanks.topClassesPages,
-    });
+      const active = loans.filter((l) => !isReturned(l.status));
+      const overdue = active.filter((l) => l.due_date && new Date(l.due_date) < now);
 
+      const pendingList = active
+        .map((loan) => {
+          let diffDays = null;
+          if (loan.due_date) {
+            const due = new Date(loan.due_date);
+            due.setHours(0, 0, 0, 0);
+            diffDays = Math.ceil((due - now) / (1000 * 60 * 60 * 24));
+          }
+          return { ...loan, diffDays };
+        })
+        .filter((loan) => loan.diffDays !== null && loan.diffDays <= 3)
+        .sort((a, b) => a.diffDays - b.diffDays);
+
+      setImpendingReturns(pendingList);
+
+      const periodCompletedLoans = loans.filter(
+        (l) => isReturned(l.status) && matchesPeriod(l.return_date || l.loan_date, period)
+      );
+
+      // Toplam fiziksel kitap (kopya) sayısını hesapla
+      const totalPhysicalBooks = books.reduce((sum, b) => sum + (Number(b.available_copies) || 1), 0);
+
+      setStats({
+        totalBooks: totalPhysicalBooks || books.length,
+        totalStudents: students.length,
+        activeLoans: active.length,
+        overdueLoans: overdue.length,
+        periodCompleted: periodCompletedLoans.length,
+      });
+
+      setRecentActivities(loans.slice(0, 6));
+
+      const monthlyReturned = loans.filter((l) => isReturned(l.status) && matchesPeriod(l.return_date || l.loan_date, 'month'));
+      const termReturned = loans.filter((l) => isReturned(l.status) && matchesPeriod(l.return_date || l.loan_date, 'term'));
+
+      const calculateRankings = (returnedLoans) => {
+        const studentMap = {};
+        const classMap = {};
+
+        returnedLoans.forEach((l) => {
+          const sId = l.student_id;
+          const pages = Number(l.books?.page_count) || 0;
+
+          if (!studentMap[sId]) {
+            studentMap[sId] = { bookCount: 0, pageCount: 0 };
+          }
+          studentMap[sId].bookCount += 1;
+          studentMap[sId].pageCount += pages;
+
+          const st = students.find((s) => String(s.id) === String(sId));
+          const grade = st?.grade_class?.trim();
+          if (grade) {
+            if (!classMap[grade]) {
+              classMap[grade] = { bookCount: 0, pageCount: 0 };
+            }
+            classMap[grade].bookCount += 1;
+            classMap[grade].pageCount += pages;
+          }
+        });
+
+        const studentList = Object.entries(studentMap).map(([sId, data]) => {
+          const found = students.find((s) => String(s.id) === String(sId));
+          return { ...found, bookCount: data.bookCount, pageCount: data.pageCount };
+        });
+
+        const topStudentsBooks = [...studentList]
+          .sort((a, b) => b.bookCount - a.bookCount || b.pageCount - a.pageCount)
+          .slice(0, 3);
+
+        const topStudentsPages = [...studentList]
+          .sort((a, b) => b.pageCount - a.pageCount || b.bookCount - a.bookCount)
+          .slice(0, 3);
+
+        const classList = Object.entries(classMap).map(([name, data]) => ({
+          name,
+          bookCount: data.bookCount,
+          pageCount: data.pageCount,
+        }));
+
+        const topClassesBooks = [...classList]
+          .sort((a, b) => b.bookCount - a.bookCount || b.pageCount - a.pageCount)
+          .slice(0, 3);
+
+        const topClassesPages = [...classList]
+          .sort((a, b) => b.pageCount - a.pageCount || b.bookCount - a.bookCount)
+          .slice(0, 3);
+
+        return {
+          topStudentsBooks,
+          topStudentsPages,
+          topClassesBooks,
+          topClassesPages,
+        };
+      };
+
+      const monthRanks = calculateRankings(monthlyReturned);
+      const termRanks = calculateRankings(termReturned);
+
+      setLeaders({
+        monthTopStudentsBooks: monthRanks.topStudentsBooks,
+        monthTopStudentsPages: monthRanks.topStudentsPages,
+        monthTopClassesBooks: monthRanks.topClassesBooks,
+        monthTopClassesPages: monthRanks.topClassesPages,
+        termTopStudentsBooks: termRanks.topStudentsBooks,
+        termTopStudentsPages: termRanks.topStudentsPages,
+        termTopClassesBooks: termRanks.topClassesBooks,
+        termTopClassesPages: termRanks.topClassesPages,
+      });
+    } catch (err) {
+      console.error('Dashboard veri yükleme hatası:', err);
+    }
     setLoading(false);
   };
 

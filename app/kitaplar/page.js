@@ -53,17 +53,43 @@ export default function KitaplarPage() {
     }
   };
 
+  // 1000 kayıt sınırını aşarak tüm kitapları (2576+) döngüyle çeken fonksiyon
   const loadBooks = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('books')
-      .select('*')
-      .order('id', { ascending: false });
+    try {
+      let allBooks = [];
+      let step = 1000;
+      let from = 0;
+      let to = 999;
+      let keepFetching = true;
 
-    if (error) {
-      setMessage({ text: 'Kitaplar yüklenirken hata: ' + error.message, type: 'error' });
-    } else {
-      setBooks(data || []);
+      while (keepFetching) {
+        const { data, error } = await supabase
+          .from('books')
+          .select('*')
+          .order('id', { ascending: false })
+          .range(from, to);
+
+        if (error) {
+          throw error;
+        }
+
+        if (data && data.length > 0) {
+          allBooks = [...allBooks, ...data];
+          if (data.length < step) {
+            keepFetching = false; // Son blok
+          } else {
+            from += step;
+            to += step;
+          }
+        } else {
+          keepFetching = false;
+        }
+      }
+
+      setBooks(allBooks);
+    } catch (err) {
+      setMessage({ text: 'Kitaplar yüklenirken hata: ' + err.message, type: 'error' });
     }
     setLoading(false);
   };
@@ -172,12 +198,18 @@ export default function KitaplarPage() {
           <p className="text-xs text-slate-400">Kütüphanedeki tüm basılı eserler, raf konumları ve anlık stoklar</p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <Link
             href="/etiketler"
             className="text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-xl transition shadow-2xs flex items-center gap-1.5"
           >
             🏷️ <span>Barkod Bas</span>
+          </Link>
+          <Link
+            href="/kitap-ekle/toplu"
+            className="text-xs font-semibold bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-800 px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
+          >
+            📁 <span>Toplu Yükle (Excel)</span>
           </Link>
           <Link
             href="/kitap-ekle"
