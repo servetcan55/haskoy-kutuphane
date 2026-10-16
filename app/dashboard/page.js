@@ -106,8 +106,11 @@ export default function DashboardPage() {
       (l) => isReturned(l.status) && matchesPeriod(l.return_date || l.loan_date, period)
     );
 
+    // Toplam fiziksel kitap (kopya) sayısını hesapla (Çeşit yerine toplam adetler)
+    const totalPhysicalBooks = books.reduce((sum, b) => sum + (Number(b.available_copies) || 1), 0);
+
     setStats({
-      totalBooks: books.length,
+      totalBooks: totalPhysicalBooks,
       totalStudents: students.length,
       activeLoans: active.length,
       overdueLoans: overdue.length,
