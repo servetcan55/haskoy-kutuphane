@@ -38,16 +38,46 @@ export default function LabelsPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // 1000 kayıt sınırını aşarak tüm kitapları (2576+) döngüyle çeken fonksiyon
   useEffect(() => {
     const fetchBooks = async () => {
       setLoading(true);
-      const { data } = await supabase
-        .from('books')
-        .select('*')
-        .order('title', { ascending: true });
-      setBooks(data || []);
+      try {
+        let allBooks = [];
+        let step = 1000;
+        let from = 0;
+        let to = 999;
+        let keepFetching = true;
+
+        while (keepFetching) {
+          const { data, error } = await supabase
+            .from('books')
+            .select('*')
+            .order('title', { ascending: true })
+            .range(from, to);
+
+          if (error) throw error;
+
+          if (data && data.length > 0) {
+            allBooks = [...allBooks, ...data];
+            if (data.length < step) {
+              keepFetching = false;
+            } else {
+              from += step;
+              to += step;
+            }
+          } else {
+            keepFetching = false;
+          }
+        }
+
+        setBooks(allBooks);
+      } catch (err) {
+        console.error('Etiketler için kitaplar yüklenirken hata:', err);
+      }
       setLoading(false);
     };
+
     fetchBooks();
   }, []);
 
@@ -227,7 +257,6 @@ export default function LabelsPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 print:grid-cols-3 print:gap-2">
               {printableList.map((book) => {
-                // ISBN yoksa güvenli bir ID bazlı barkod kodu üretiyoruz
                 const barcodeValue = book.isbn ? book.isbn : `1000${book.id}`;
                 return (
                   <div
