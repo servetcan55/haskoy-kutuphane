@@ -41,143 +41,173 @@ export default function StatisticsPage() {
     const fetchAnalytics = async () => {
       setLoading(true);
 
-      const [booksRes, studentsRes, loansRes, goalRes, pageGoalRes] = await Promise.all([
-        supabase.from('books').select('id, title, author, cover_url, page_count'),
-        supabase.from('students').select('id, student_number, full_name, grade_class'),
-        supabase.from('loans').select('id, book_id, student_id, status, loan_date, return_date'),
-        supabase.from('settings').select('value').eq('id', 'term_goal').maybeSingle(),
-        supabase.from('settings').select('value').eq('id', 'term_page_goal').maybeSingle(),
-      ]);
+      try {
+        // 1000 kayıt sınırını aşarak tüm kitapları (2576+) döngüyle çekiyoruz
+        let allBooks = [];
+        let step = 1000;
+        let from = 0;
+        let to = 999;
+        let keepFetching = true;
 
-      if (goalRes.data?.value) {
-        const parsed = parseInt(goalRes.data.value, 10);
-        if (!isNaN(parsed) && parsed > 0) setTermGoal(parsed);
-      }
-      if (pageGoalRes.data?.value) {
-        const parsedPages = parseInt(pageGoalRes.data.value, 10);
-        if (!isNaN(parsedPages) && parsedPages > 0) setTermPageGoal(parsedPages);
-      }
+        while (keepFetching) {
+          const { data, error } = await supabase
+            .from('books')
+            .select('id, title, author, cover_url, page_count')
+            .range(from, to);
 
-      const books = booksRes.data || [];
-      const students = studentsRes.data || [];
-      const loans = loansRes.data || [];
+          if (error) throw error;
 
-      setAllBooksData(books);
-      setAllStudentsData(students);
-      setAllLoansData(loans);
-
-      // Şube Listesini Dinamik Topla ve İlkini Varsayılan Yap
-      const uniqueGrades = Array.from(
-        new Set(students.map((s) => s.grade_class?.trim()).filter(Boolean))
-      ).sort();
-      setAvailableClasses(uniqueGrades);
-      
-      if (uniqueGrades.length > 0 && (!selectedPrintGrade || !uniqueGrades.includes(selectedPrintGrade))) {
-        setSelectedPrintGrade(uniqueGrades[0]);
-      }
-
-      const isReturned = (status) => {
-        if (!status) return false;
-        const s = String(status).toLowerCase().trim();
-        return (s.includes('iade') || s.includes('return')) && !s.includes('kayıp');
-      };
-
-      const periodCompleted = loans.filter(
-        (l) => isReturned(l.status) && matchesPeriod(l.return_date || l.loan_date, period)
-      );
-
-      const activeLoans = loans.filter((l) => !isReturned(l.status));
-
-      let totalPages = 0;
-      const studentMetrics = {};
-      const classMetrics = {};
-      const uniqueReaders = new Set();
-
-      periodCompleted.forEach((l) => {
-        const bookObj = books.find((b) => String(b.id) === String(l.book_id));
-        const pages = Number(bookObj?.page_count) || 0;
-        totalPages += pages;
-        uniqueReaders.add(String(l.student_id));
-
-        if (!studentMetrics[l.student_id]) {
-          studentMetrics[l.student_id] = { bookCount: 0, pageCount: 0 };
+          if (data && data.length > 0) {
+            allBooks = [...allBooks, ...data];
+            if (data.length < step) {
+              keepFetching = false;
+            } else {
+              from += step;
+              to += step;
+            }
+          } else {
+            keepFetching = false;
+          }
         }
-        studentMetrics[l.student_id].bookCount += 1;
-        studentMetrics[l.student_id].pageCount += pages;
 
-        const studentObj = students.find((s) => String(s.id) === String(l.student_id));
-        const className = studentObj?.grade_class?.trim() || 'Belirtilmedi';
-        if (!classMetrics[className]) {
-          classMetrics[className] = { bookCount: 0, pageCount: 0 };
+        const [studentsRes, loansRes, goalRes, pageGoalRes] = await Promise.all([
+          supabase.from('students').select('id, student_number, full_name, grade_class'),
+          supabase.from('loans').select('id, book_id, student_id, status, loan_date, return_date'),
+          supabase.from('settings').select('value').eq('id', 'term_goal').maybeSingle(),
+          supabase.from('settings').select('value').eq('id', 'term_page_goal').maybeSingle(),
+        ]);
+
+        if (goalRes.data?.value) {
+          const parsed = parseInt(goalRes.data.value, 10);
+          if (!isNaN(parsed) && parsed > 0) setTermGoal(parsed);
         }
-        classMetrics[className].bookCount += 1;
-        classMetrics[className].pageCount += pages;
-      });
+        if (pageGoalRes.data?.value) {
+          const parsedPages = parseInt(pageGoalRes.data.value, 10);
+          if (!isNaN(parsedPages) && parsedPages > 0) setTermPageGoal(parsedPages);
+        }
 
-      setOverview({
-        totalBooks: books.length,
-        totalStudents: students.length,
-        activeLoans: activeLoans.length,
-        periodRead: periodCompleted.length,
-        periodPages: totalPages,
-        activeReadersCount: uniqueReaders.size,
-      });
+        const books = allBooks;
+        const students = studentsRes.data || [];
+        const loans = loansRes.data || [];
 
-      const studentsList = Object.entries(studentMetrics).map(([studentId, data]) => {
-        const studentObj = students.find((s) => String(s.id) === String(studentId));
-        return {
-          id: studentId,
-          name: studentObj ? studentObj.full_name : 'Bilinmeyen Öğrenci',
-          student_number: studentObj?.student_number || '-',
-          grade_class: studentObj?.grade_class || '-',
+        setAllBooksData(books);
+        setAllStudentsData(students);
+        setAllLoansData(loans);
+
+        // Şube Listesini Dinamik Topla ve İlkini Varsayılan Yap
+        const uniqueGrades = Array.from(
+          new Set(students.map((s) => s.grade_class?.trim()).filter(Boolean))
+        ).sort();
+        setAvailableClasses(uniqueGrades);
+        
+        if (uniqueGrades.length > 0 && (!selectedPrintGrade || !uniqueGrades.includes(selectedPrintGrade))) {
+          setSelectedPrintGrade(uniqueGrades[0]);
+        }
+
+        const isReturned = (status) => {
+          if (!status) return false;
+          const s = String(status).toLowerCase().trim();
+          return (s.includes('iade') || s.includes('return')) && !s.includes('kayıp');
+        };
+
+        const periodCompleted = loans.filter(
+          (l) => isReturned(l.status) && matchesPeriod(l.return_date || l.loan_date, period)
+        );
+
+        const activeLoans = loans.filter((l) => !isReturned(l.status));
+
+        let totalPages = 0;
+        const studentMetrics = {};
+        const classMetrics = {};
+        const uniqueReaders = new Set();
+
+        periodCompleted.forEach((l) => {
+          const bookObj = books.find((b) => String(b.id) === String(l.book_id));
+          const pages = Number(bookObj?.page_count) || 0;
+          totalPages += pages;
+          uniqueReaders.add(String(l.student_id));
+
+          if (!studentMetrics[l.student_id]) {
+            studentMetrics[l.student_id] = { bookCount: 0, pageCount: 0 };
+          }
+          studentMetrics[l.student_id].bookCount += 1;
+          studentMetrics[l.student_id].pageCount += pages;
+
+          const studentObj = students.find((s) => String(s.id) === String(l.student_id));
+          const className = studentObj?.grade_class?.trim() || 'Belirtilmedi';
+          if (!classMetrics[className]) {
+            classMetrics[className] = { bookCount: 0, pageCount: 0 };
+          }
+          classMetrics[className].bookCount += 1;
+          classMetrics[className].pageCount += pages;
+        });
+
+        setOverview({
+          totalBooks: books.length,
+          totalStudents: students.length,
+          activeLoans: activeLoans.length,
+          periodRead: periodCompleted.length,
+          periodPages: totalPages,
+          activeReadersCount: uniqueReaders.size,
+        });
+
+        const studentsList = Object.entries(studentMetrics).map(([studentId, data]) => {
+          const studentObj = students.find((s) => String(s.id) === String(studentId));
+          return {
+            id: studentId,
+            name: studentObj ? studentObj.full_name : 'Bilinmeyen Öğrenci',
+            student_number: studentObj?.student_number || '-',
+            grade_class: studentObj?.grade_class || '-',
+            bookCount: data.bookCount,
+            pageCount: data.pageCount,
+          };
+        });
+
+        setTopStudentsByBooks(
+          [...studentsList].sort((a, b) => b.bookCount - a.bookCount || b.pageCount - a.pageCount).slice(0, 5)
+        );
+        setTopStudentsByPages(
+          [...studentsList].sort((a, b) => b.pageCount - a.pageCount || b.bookCount - a.bookCount).slice(0, 5)
+        );
+
+        const periodAllLoans = loans.filter((l) => matchesPeriod(l.loan_date, period));
+        const bookReadMap = {};
+        periodAllLoans.forEach((l) => {
+          bookReadMap[l.book_id] = (bookReadMap[l.book_id] || 0) + 1;
+        });
+
+        const bookRanking = Object.entries(bookReadMap)
+          .map(([bookId, count]) => {
+            const bookObj = books.find((b) => String(b.id) === String(bookId));
+            return {
+              id: bookId,
+              title: bookObj ? bookObj.title : 'Bilinmeyen Kitap',
+              author: bookObj?.author || 'Yazar Yok',
+              cover_url: bookObj?.cover_url || null,
+              page_count: bookObj?.page_count || 0,
+              count,
+            };
+          })
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5);
+
+        setTopBooks(bookRanking);
+
+        const classesList = Object.entries(classMetrics).map(([grade, data]) => ({
+          grade,
           bookCount: data.bookCount,
           pageCount: data.pageCount,
-        };
-      });
+        }));
 
-      setTopStudentsByBooks(
-        [...studentsList].sort((a, b) => b.bookCount - a.bookCount || b.pageCount - a.pageCount).slice(0, 5)
-      );
-      setTopStudentsByPages(
-        [...studentsList].sort((a, b) => b.pageCount - a.pageCount || b.bookCount - a.bookCount).slice(0, 5)
-      );
-
-      const periodAllLoans = loans.filter((l) => matchesPeriod(l.loan_date, period));
-      const bookReadMap = {};
-      periodAllLoans.forEach((l) => {
-        bookReadMap[l.book_id] = (bookReadMap[l.book_id] || 0) + 1;
-      });
-
-      const bookRanking = Object.entries(bookReadMap)
-        .map(([bookId, count]) => {
-          const bookObj = books.find((b) => String(b.id) === String(bookId));
-          return {
-            id: bookId,
-            title: bookObj ? bookObj.title : 'Bilinmeyen Kitap',
-            author: bookObj?.author || 'Yazar Yok',
-            cover_url: bookObj?.cover_url || null,
-            page_count: bookObj?.page_count || 0,
-            count,
-          };
-        })
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 5);
-
-      setTopBooks(bookRanking);
-
-      const classesList = Object.entries(classMetrics).map(([grade, data]) => ({
-        grade,
-        bookCount: data.bookCount,
-        pageCount: data.pageCount,
-      }));
-
-      setClassStatsByBooks(
-        [...classesList].sort((a, b) => b.bookCount - a.bookCount || b.pageCount - a.pageCount)
-      );
-      setClassStatsByPages(
-        [...classesList].sort((a, b) => b.pageCount - a.pageCount || b.bookCount - a.bookCount)
-      );
-
+        setClassStatsByBooks(
+          [...classesList].sort((a, b) => b.bookCount - a.bookCount || b.pageCount - a.pageCount)
+        );
+        setClassStatsByPages(
+          [...classesList].sort((a, b) => b.pageCount - a.pageCount || b.bookCount - a.bookCount)
+        );
+      } catch (err) {
+        console.error('İstatistik verileri yüklenirken hata:', err);
+      }
       setLoading(false);
     };
 
@@ -289,7 +319,7 @@ export default function StatisticsPage() {
         </div>
       </div>
 
-      {/* Dönem Filtresi (Sıralama: Bu Ay - Bu Dönem - Tüm Zamanlar) */}
+      {/* Dönem Filtresi */}
       <div className="flex justify-between items-center flex-wrap gap-3">
         <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
           <span>Aktif Okur Oranı:</span>
