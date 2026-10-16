@@ -94,10 +94,13 @@ export default function LoginPage() {
       <div className="max-w-md w-full bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-3xl p-7 sm:p-8 shadow-2xl space-y-6 z-10">
         
         <div className="text-center space-y-1.5">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-400 p-0.5 shadow-xl shadow-blue-500/25 mx-auto">
-            <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center font-black text-2xl text-transparent bg-clip-text bg-gradient-to-tr from-blue-400 to-cyan-300">
-              H
-            </div>
+          {/* OKUL LOGOSU */}
+          <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-700/80 p-1 shadow-xl shadow-blue-500/25 mx-auto overflow-hidden flex items-center justify-center">
+            <img 
+              src="/okul-logo.png" 
+              alt="Hasköy Ortaokulu Logosu" 
+              className="w-full h-full object-contain rounded-[12px]" 
+            />
           </div>
           <span className="text-[11px] font-black tracking-widest uppercase text-cyan-400 block pt-1">
             Canik / Samsun • {currentAcademic.academicYear}

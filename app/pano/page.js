@@ -241,7 +241,7 @@ export default function LibraryKioskPage() {
   const loadKioskData = async () => {
     try {
       const [booksCountRes, booksRes, studentsRes, loansRes, goalRes, pageGoalRes, quotesRes, scheduleRes] = await Promise.all([
-        supabase.from('books').select('*', { count: 'exact', head: true }), // <-- 2576+ toplam kitap sayısını tam alır
+        supabase.from('books').select('*', { count: 'exact', head: true }),
         supabase.from('books').select('*').limit(100),
         supabase.from('students').select('*'),
         supabase.from('loans').select(`
@@ -396,7 +396,7 @@ export default function LibraryKioskPage() {
       }
 
       setStats({
-        totalBooks: totalBookCount, // <-- Gerçek toplam sayı (2576+)
+        totalBooks: totalBookCount,
         totalStudents: students.length,
         monthlyRead: monthlyCompleted.length,
         termRead: termCompleted.length,
@@ -436,10 +436,12 @@ export default function LibraryKioskPage() {
         
         {/* SOL: LOGO & BAŞLIK */}
         <div className="lg:col-span-4 flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-400 p-0.5 shadow-xl shadow-blue-500/20 ring-1 ring-white/20 shrink-0">
-            <div className="w-full h-full bg-slate-950/80 rounded-[14px] flex items-center justify-center font-black text-xl text-transparent bg-clip-text bg-gradient-to-tr from-blue-400 to-cyan-300">
-              H
-            </div>
+          <div className="w-11 h-11 rounded-2xl bg-slate-900 border border-slate-700/80 p-0.5 shadow-xl shrink-0 overflow-hidden flex items-center justify-center">
+            <img 
+              src="/okul-logo.png" 
+              alt="Hasköy Ortaokulu Logosu" 
+              className="w-full h-full object-contain rounded-[14px]" 
+            />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-0.5">
@@ -588,7 +590,7 @@ export default function LibraryKioskPage() {
         </div>
       </div>
 
-      {/* 3. ORTA BÖLÜM: 3 SÜTUN DA KUSURSUZ %50 - %50 EŞİT BÖLÜNMÜŞ (TAM SİMETRİ) */}
+      {/* 3. ORTA BÖLÜM: 3 SÜTUN EŞİT BÖLÜNMÜŞ (TAM SİMETRİ) */}
       <main className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3 my-1 z-10">
         
         {/* SOL SÜTUN (4 KOLON): 1. KİTAP KURTLARI + 2. SAYFA ŞAMPİYONLARI */}
@@ -759,7 +761,7 @@ export default function LibraryKioskPage() {
 
         </div>
 
-        {/* SAĞ SÜTUN (4 KOLON): TENEFFÜS PROGRAMI + KÜLTÜR VİTRİNİ & ÖĞRENCİ PORTALI QR KODU */}
+        {/* SAĞ SÜTUN (4 KOLON): TENEFFÜS PROGRAMI + KÜLTÜR VİTRİNİ & QR */}
         <div className="lg:col-span-4 grid grid-rows-2 gap-3 h-full min-h-0">
           
           {/* 3A: SAĞ ÜST KUTU: GÜNÜN TENEFFÜS PROGRAMI */}
@@ -820,7 +822,7 @@ export default function LibraryKioskPage() {
             </div>
           </div>
 
-          {/* 3B: SAĞ ALT KUTU: DÖNÜŞÜMLÜ KÜLTÜR VİTRİNİ + DİNAMİK ÖĞRENCİ PORTALI QR KODU */}
+          {/* 3B: SAĞ ALT KUTU: KÜLTÜR VİTRİNİ + QR */}
           <div className="bg-slate-900/70 backdrop-blur-xl border border-indigo-500/30 rounded-3xl p-3 flex flex-col justify-between shadow-xl min-h-0 overflow-hidden">
             {/* Üst: Vitrin Başlığı ve Döngü Butonları */}
             <div className="flex items-center justify-between pb-1 border-b border-indigo-500/20 shrink-0">
@@ -854,7 +856,7 @@ export default function LibraryKioskPage() {
               </div>
             </div>
 
-            {/* Orta: 3'lü Dönüşümlü İçerik */}
+            {/* Orta: İçerik */}
             <div className="flex-1 flex items-center min-h-0 py-1">
               {cultureMode === 'book' && (
                 activeRecBook ? (
@@ -918,7 +920,7 @@ export default function LibraryKioskPage() {
               )}
             </div>
 
-            {/* Alt: Dinamik Öğrenci Portalı Karekod Alanı */}
+            {/* Alt: QR Kodu */}
             <div className="pt-1.5 border-t border-indigo-500/20 flex items-center justify-between gap-2.5 shrink-0 bg-slate-950/40 -mx-3 -mb-3 p-2.5 px-3">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="w-8 h-8 bg-white p-0.5 rounded-lg shrink-0 flex items-center justify-center shadow-md">
@@ -952,7 +954,7 @@ export default function LibraryKioskPage() {
 
       </main>
 
-      {/* 4. DİNAMİK GÜNÜN SÖZÜ & CANLI HAVA DURUMU AKILLI MOTİVASYON BANDI */}
+      {/* 4. DİNAMİK GÜNÜN SÖZÜ & CANLI HAVA DURUMU BANDI */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl px-4 py-1.5 my-1 z-10 flex items-center gap-3 overflow-hidden shadow-inner shrink-0">
         {bottomTickerMode === 'quote' ? (
           <div className="flex items-center gap-3 w-full animate-in fade-in duration-500 truncate">
@@ -977,7 +979,7 @@ export default function LibraryKioskPage() {
         )}
       </div>
 
-      {/* 5. ALT BAR: Sayaçlar & Çıkış */}
+      {/* 5. ALT BAR */}
       <footer className="pt-1.5 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 z-10 shrink-0">
         <div className="grid grid-cols-4 gap-3 lg:gap-6 w-full sm:w-auto">
           <div className="flex items-center gap-2">
