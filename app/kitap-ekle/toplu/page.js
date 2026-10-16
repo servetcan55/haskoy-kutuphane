@@ -10,6 +10,20 @@ export default function TopluKitapYuklePage() {
   const [preview, setPreview] = useState([]);
   const [message, setMessage] = useState({ text: '', type: '' });
 
+  // Türkçe karakterlere duyarlı düzgün başlık formatına dönüştürme fonksiyonu (Title Case)
+  const toTitleCase = (str) => {
+    if (!str) return '';
+    return str
+      .toLocaleLowerCase('tr-TR')
+      .split(' ')
+      .map((word) => {
+        if (!word) return '';
+        // Bağlaçlar veya küçük kalması istenen kelimeler hariç ilk harfi büyük yap
+        return word.charAt(0).toLocaleUpperCase('tr-TR') + word.slice(1);
+      })
+      .join(' ');
+  };
+
   // CSV dosyasını okuma ve önizleme
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
@@ -23,7 +37,7 @@ export default function TopluKitapYuklePage() {
     reader.readAsText(file, 'utf-8');
   };
 
-  // CSV metnini sütunlara ayırma (Noktalı virgül ve Türkçe Excel uyumlu)
+  // CSV metnini sütunlara ayırma ve büyük harfleri düzenleme
   const parseCSV = (text) => {
     const lines = text.split(/\r\n|\n/);
     const books = [];
@@ -33,31 +47,29 @@ export default function TopluKitapYuklePage() {
       const line = lines[i].trim();
       if (!line) continue;
 
-      // Sadece noktalı virgüllerden oluşan boş satırları atla
       if (line.replace(/;/g, '').trim() === '') continue;
 
-      // Sütunları noktalı virgüle göre ayırıyoruz (Excel CSV UTF-8 formatı)
       const cols = line.split(';'); 
       
       if (cols.length >= 2) {
-        const title = cols[1]?.replace(/"/g, '').trim();
-        if (!title) continue; // Kitap adı yoksa satırı atla
+        const rawTitle = cols[1]?.replace(/"/g, '').trim();
+        if (!rawTitle) continue;
 
         books.push({
           isbn: cols[0]?.replace(/"/g, '').trim() || '',
-          title: title,
-          author: cols[2]?.replace(/"/g, '').trim() || '',
-          publisher: cols[3]?.replace(/"/g, '').trim() || '',
+          title: toTitleCase(rawTitle), // Kitap adını düzgün formata çevir
+          author: toTitleCase(cols[2]?.replace(/"/g, '').trim() || ''), // Yazar adını düzgün formata çevir
+          publisher: toTitleCase(cols[3]?.replace(/"/g, '').trim() || ''), // Yayınevini düzgün formata çevir
           page_count: parseInt(cols[5]?.replace(/"/g, '').trim(), 10) || 0,
-          category: cols[6]?.replace(/"/g, '').trim() || 'Roman',
+          category: toTitleCase(cols[6]?.replace(/"/g, '').trim() || 'Roman'),
           demirbas_no: cols[7]?.replace(/"/g, '').trim() || cols[0]?.replace(/"/g, '').trim() || '',
-          available_copies: 1, // Her satır kendi demirbaş numarasına sahip fiziksel kopya
+          available_copies: 1,
         });
       }
     }
 
     setPreview(books);
-    setMessage({ text: `${books.length} adet geçerli kitap dosyadan okundu ve önizlemeye hazır.`, type: 'success' });
+    setMessage({ text: `${books.length} adet kitap büyük/küçük harf düzenlemesi yapılarak önizlemeye hazır hale getirildi.`, type: 'success' });
   };
 
   // Veritabanındaki TÜM ESKİ KİTAPLARI SİLME FONKSİYONU
@@ -69,16 +81,13 @@ export default function TopluKitapYuklePage() {
     setLoading(true);
     setMessage({ text: 'Eski kitaplar siliniyor, lütfen bekleyin...', type: 'success' });
 
-    // Önce bağlı emanet kayıtlarını (loans) temizleyelim ki foreign key hatası alınmasın
     await supabase.from('loans').delete().neq('id', 0);
-    
-    // Sonra kitapları tamamen siliyoruz
     const { error } = await supabase.from('books').delete().neq('id', 0);
 
     if (error) {
       setMessage({ text: 'Silme hatası: ' + error.message, type: 'error' });
     } else {
-      setMessage({ text: 'Veritabanındaki tüm eski kitaplar başarıyla temizlendi! Şimdi yeni listeyi yükleyebilirsiniz.', type: 'success' });
+      setMessage({ text: 'Veritabanındaki tüm eski kitaplar başarıyla temizlendi! Şimdi düzeltilmiş listeyi yükleyebilirsiniz.', type: 'success' });
     }
     setLoading(false);
   };
@@ -87,14 +96,14 @@ export default function TopluKitapYuklePage() {
   const handleUploadToDatabase = async () => {
     if (preview.length === 0) return;
     setLoading(true);
-    setMessage({ text: 'Kitaplar veritabanına yükleniyor, lütfen bekleyin...', type: 'success' });
+    setMessage({ text: 'Düzeltilmiş kitaplar veritabanına yükleniyor, lütfen bekleyin...', type: 'success' });
 
     const { error } = await supabase.from('books').insert(preview);
 
     if (error) {
       setMessage({ text: 'Yükleme hatası: ' + error.message, type: 'error' });
     } else {
-      setMessage({ text: `Tebrikler! ${preview.length} kitap başarıyla sisteme eklendi.`, type: 'success' });
+      setMessage({ text: `Tebrikler! ${preview.length} kitap başlık formatları düzenlenerek başarıyla eklendi.`, type: 'success' });
       setTimeout(() => {
         router.push('/kitaplar');
       }, 2000);
@@ -108,7 +117,7 @@ export default function TopluKitapYuklePage() {
         <div>
           <span className="text-xs font-semibold text-blue-600 uppercase tracking-wider">Katalog Yönetimi</span>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Excel / CSV ile Toplu Kitap Yükleme</h1>
-          <p className="text-xs text-slate-400">Elinizdeki binlerce eseri demirbaş numaralarıyla birlikte tek tıkla aktarın</p>
+          <p className="text-xs text-slate-400">Büyük harfli metinleri otomatik düzenleyerek tertemiz bir şekilde aktarın</p>
         </div>
         <Link
           href="/kitaplar"
@@ -130,7 +139,7 @@ export default function TopluKitapYuklePage() {
       <div className="bg-rose-50/60 p-5 rounded-3xl border border-rose-200 flex items-center justify-between gap-4">
         <div>
           <h3 className="text-xs font-black text-rose-900">Mevcut Envanteri Temizle</h3>
-          <p className="text-[11px] text-rose-700 mt-0.5">Eğer veritabanındaki eski test kayıtlarını silip sıfırdan başlamak istiyorsanız aşağıdaki butonu kullanabilirsiniz.</p>
+          <p className="text-[11px] text-rose-700 mt-0.5">Büyük harfli eski kayıtları silip düzenlenmiş versiyonu yüklemek için önce buraya basabilirsiniz.</p>
         </div>
         <button
           onClick={handleClearAllBooks}
@@ -151,7 +160,7 @@ export default function TopluKitapYuklePage() {
           className="block w-full text-xs text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
         />
         <p className="text-[11px] text-slate-400">
-          * Not: Excel dosyanızı kaydederken tür olarak <b>CSV UTF-8 (Virgülle ayrılmış)</b> seçtiğinizden emin olun.
+          * Not: Yükleme sırasında tüm kitap adları ve yazarlar otomatik olarak düzgün cümle biçimine dönüştürülecektir.
         </p>
       </div>
 
@@ -159,7 +168,7 @@ export default function TopluKitapYuklePage() {
       {preview.length > 0 && (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 space-y-4">
           <div className="flex justify-between items-center">
-            <h3 className="text-sm font-bold text-slate-900">Yüklenecek Kitaplar Önizlemesi ({preview.length} Eser)</h3>
+            <h3 className="text-sm font-bold text-slate-900">Düzenlenmiş Önizleme ({preview.length} Eser)</h3>
             <button
               onClick={handleUploadToDatabase}
               disabled={loading}
@@ -174,8 +183,8 @@ export default function TopluKitapYuklePage() {
               <thead className="bg-slate-50 text-slate-500 sticky top-0 border-b border-slate-100">
                 <tr>
                   <th className="p-3 font-bold">Demirbaş No</th>
-                  <th className="p-3 font-bold">Kitap Adı</th>
-                  <th className="p-3 font-bold">Yazar</th>
+                  <th className="p-3 font-bold">Kitap Adı (Düzenlenmiş)</th>
+                  <th className="p-3 font-bold">Yazar (Düzenlenmiş)</th>
                   <th className="p-3 font-bold">Yayınevi</th>
                   <th className="p-3 font-bold">Sayfa</th>
                   <th className="p-3 font-bold">Tür</th>
