@@ -6,7 +6,15 @@ import { supabase } from '../../lib/supabase';
 export default function KitaplarPage() {
   const [books, setBooks] = useState([]);
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState('demirbas_asc'); // Sıralama state'i (Varsayılan: Demirbaş No Artan)
+  
+  // Sıralama tercihini localStorage'dan başlatıyoruz (varsayılan: 'demirbas_asc')
+  const [sortBy, setSortBy] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('haskoy_book_sort') || 'demirbas_asc';
+    }
+    return 'demirbas_asc';
+  });
+
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [message, setMessage] = useState({ text: '', type: '' });
@@ -37,6 +45,14 @@ export default function KitaplarPage() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Sıralama değiştiğinde tarayıcı hafızasına kaydediyoruz
+  const handleSortChange = (newSort) => {
+    setSortBy(newSort);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('haskoy_book_sort', newSort);
+    }
+  };
+
   const loadBooks = async () => {
     setLoading(true);
     const { data, error } = await supabase
@@ -56,8 +72,7 @@ export default function KitaplarPage() {
     loadBooks();
   }, []);
 
-const handleDeleteBook = async (id, title) => {
-    // Oturum kontrolünü tamamen esnetip doğrudan silme yetkisini açalım:
+  const handleDeleteBook = async (id, title) => {
     if (!confirm(`"${title}" isimli kitabı kütüphaneden kalıcı olarak silmek istediğinize emin misiniz?`)) return;
 
     await supabase.from('loans').delete().eq('book_id', id);
@@ -204,7 +219,7 @@ const handleDeleteBook = async (id, title) => {
             <span className="text-[11px] font-bold text-slate-500">Sırala:</span>
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
+              onChange={(e) => handleSortChange(e.target.value)}
               className="bg-slate-50/80 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition font-medium cursor-pointer"
             >
               <option value="demirbas_asc">🏷️ Demirbaş No (Artan)</option>
@@ -218,6 +233,7 @@ const handleDeleteBook = async (id, title) => {
           <span className="text-xs text-slate-400 font-mono hidden md:inline">
             (<strong className="text-slate-700">{filteredBooks.length}</strong> eser)
           </span>
+
         </div>
       </div>
 
@@ -231,7 +247,7 @@ const handleDeleteBook = async (id, title) => {
       ) : (
         <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden">
           <div className="divide-y divide-slate-100">
-            {filteredBooks.map((b) => {
+            {filteredBooks.map((b, index) => {
               const inStock = (b.available_copies || 0) > 0;
               return (
                 <div
@@ -262,7 +278,7 @@ const handleDeleteBook = async (id, title) => {
                           </span>
                         )}
                         <span className="font-mono text-[10px] text-slate-400 font-bold">
-                          #{b.id}
+                          #{index + 1}
                         </span>
                       </div>
 

@@ -8,16 +8,21 @@ function BarcodeItem({ value }) {
   const svgRef = useRef(null);
 
   useEffect(() => {
-    if (svgRef.current && value) {
+    if (svgRef.current) {
       try {
-        JsBarcode(svgRef.current, String(value), {
-          format: 'CODE128',
-          width: 1.25,
-          height: 34,
-          displayValue: true,
-          fontSize: 10,
-          margin: 0,
-        });
+        // Barkod için güvenli string oluşturma ve geçersiz karakterleri temizleme
+        const safeValue = String(value || '').replace(/[^a-zA-Z0-9-_]/g, '').trim();
+        
+        if (safeValue.length > 0) {
+          JsBarcode(svgRef.current, safeValue, {
+            format: 'CODE128',
+            width: 1.25,
+            height: 34,
+            displayValue: true,
+            fontSize: 10,
+            margin: 0,
+          });
+        }
       } catch (err) {
         console.error('Barkod çizilemedi:', err);
       }
@@ -70,36 +75,26 @@ export default function LabelsPage() {
 
   return (
     <>
-      {/* 
-        BU CSS BLOĞU YAZDIRMA SORUNLARINI KÖKÜNDEN ÇÖZER:
-        - Yan menü boşluklarını sıfırlar
-        - Etiket ızgarasını kâğıdın tam sol-üst köşesine (0,0) sabitler
-        - Dikey kaydırma çubuğunu zorla yok eder
-        - Tarayıcının URL ve Tarih eklemesini (header/footer) kaldırır
-      */}
       <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 5mm; /* Header ve footer'ı yok ederken güvenli etiket baskı payı bırakır */
+            margin: 5mm;
           }
           
-          /* Tüm ekran kısıtlamalarını ve kaydırma çubuklarını yıkıyoruz */
           html, body {
             background-color: white !important;
             margin: 0 !important;
             padding: 0 !important;
             width: 100% !important;
             height: auto !important;
-            overflow: visible !important; /* Dikey scroll'u kaldırır */
+            overflow: visible !important;
           }
 
-          /* Ana layout'taki tüm hizalamaları (sidebar boşluğu dahil) sıfırlarız */
           body, main, div {
             position: static !important;
           }
 
-          /* Yazdırma Kapsayıcısı: Kâğıdın sınırlarına %100 hükmeder */
           .print-full-width-container {
             display: block !important;
             position: absolute !important;
@@ -119,13 +114,11 @@ export default function LabelsPage() {
         }
       `}</style>
 
-      {/* Ana Kapsayıcıya Yazdırma İçin Özel Sınıf (print-full-width-container) Ekliyoruz */}
       <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto antialiased print-full-width-container">
         
         {/* YAZDIRMA ESNASINDA GİZLENECEK KONTROL MERKEZİ */}
         <div className="print:hidden space-y-6">
           
-          {/* Üst Command Header */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-200/80">
             <div>
               <div className="flex items-center gap-2">
@@ -156,7 +149,6 @@ export default function LabelsPage() {
             </div>
           </div>
 
-          {/* Bento Kontrol ve Arama Paneli */}
           <div className="bg-white/80 backdrop-blur-md p-4 rounded-2xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row justify-between items-center gap-3">
             <div className="flex items-center gap-3">
               <button
@@ -190,7 +182,6 @@ export default function LabelsPage() {
             </div>
           </div>
 
-          {/* Seçim Listesi Tablosu */}
           <div className="bg-white/80 backdrop-blur-md rounded-2xl border border-slate-200/90 shadow-2xs max-h-48 overflow-y-auto divide-y divide-slate-100 text-xs">
             {books
               .filter((b) => b.title?.toLowerCase().includes(search.toLowerCase()))
@@ -220,7 +211,7 @@ export default function LabelsPage() {
           </div>
         </div>
 
-        {/* YAZDIRILACAK ALAN (A4 Sayfa Izgarası) */}
+        {/* YAZDIRILACAK ALAN */}
         <div className="bg-white/90 backdrop-blur-md p-6 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.03)] print:shadow-none print:border-none print:p-0 print:m-0">
           <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100 print:hidden">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
@@ -236,7 +227,8 @@ export default function LabelsPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 print:grid-cols-3 print:gap-2">
               {printableList.map((book) => {
-                const barcodeValue = book.isbn || `HK-${String(book.id).padStart(5, '0')}`;
+                // ISBN yoksa güvenli bir ID bazlı barkod kodu üretiyoruz
+                const barcodeValue = book.isbn ? book.isbn : `1000${book.id}`;
                 return (
                   <div
                     key={book.id}
@@ -254,12 +246,10 @@ export default function LabelsPage() {
                       </p>
                     </div>
 
-                    {/* Barkod Çizgisi */}
                     <div className="my-1 flex items-center justify-center">
                       <BarcodeItem value={barcodeValue} />
                     </div>
 
-                    {/* Raf ve Stok Bilgisi */}
                     <div className="w-full flex justify-between items-center text-[10px] font-bold border-t border-slate-100 pt-1 text-slate-700 font-mono">
                       <span className="bg-slate-100 px-2 py-0.5 rounded-md">
                         Raf: {book.shelf_location || 'Yok'}
