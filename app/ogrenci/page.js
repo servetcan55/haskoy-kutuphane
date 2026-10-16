@@ -44,13 +44,43 @@ export default function StudentPortalPage() {
     }
   }, []);
 
-  // 2. Öğrenci Profilini ve Verilerini Getir
+  // 2. Öğrenci Profilini ve Verilerini Getir (1000 kayıt sınırını aşan döngülü kitap çekimiyle)
   const fetchStudentProfile = async (studentId) => {
     setLoading(true);
 
-    const [studentRes, booksRes, loansRes, favRes] = await Promise.all([
+    let allBooks = [];
+    let step = 1000;
+    let from = 0;
+    let to = 999;
+    let keepFetching = true;
+
+    try {
+      while (keepFetching) {
+        const { data, error } = await supabase
+          .from('books')
+          .select('*')
+          .range(from, to);
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          allBooks = [...allBooks, ...data];
+          if (data.length < step) {
+            keepFetching = false;
+          } else {
+            from += step;
+            to += step;
+          }
+        } else {
+          keepFetching = false;
+        }
+      }
+    } catch (err) {
+      console.error('Öğrenci kataloğu kitaplar yüklenirken hata:', err);
+    }
+
+    const [studentRes, loansRes, favRes] = await Promise.all([
       supabase.from('students').select('*').eq('id', studentId).single(),
-      supabase.from('books').select('*'),
       supabase.from('loans').select('*'),
       supabase.from('student_favorites').select('book_id').eq('student_id', studentId),
     ]);
@@ -60,7 +90,6 @@ export default function StudentPortalPage() {
       localStorage.setItem('haskoy_student_session', JSON.stringify(studentRes.data));
     }
 
-    const allBooks = booksRes.data || [];
     const rawLoans = loansRes.data || [];
     const favIds = (favRes.data || []).map((f) => f.book_id);
     setFavorites(favIds);
@@ -72,12 +101,11 @@ export default function StudentPortalPage() {
       return (s.includes('iade') || s.includes('return') || s.includes('teslim') || s.includes('tamam')) && !s.includes('kayıp');
     };
 
-    // Hangi kitaplar şu an emanette? (İade edilmemiş tüm loan kayıtları)
+    // Hangi kitaplar şu an emanette?
     const activeLoanBookIds = new Set(
       rawLoans.filter((l) => !isReturned(l.status, l.return_date)).map((l) => String(l.book_id))
     );
 
-    // Kitapların sayfa sayısını destekleyen güvenli okuma (page_count veya sayfa_sayisi)
     const processedBooks = allBooks.map((b) => ({
       ...b,
       page_count: Number(b.page_count || b.sayfa_sayisi || 0),
@@ -93,11 +121,9 @@ export default function StudentPortalPage() {
       return { ...l, book: foundBook || null };
     });
 
-    // Öğrencinin elindekiler
     const currentActive = myLoans.filter((l) => !isReturned(l.status, l.return_date));
     setActiveLoans(currentActive);
 
-    // Öğrencinin tamamladığı okumalar (Geçmiş)
     const completed = myLoans.filter((l) => isReturned(l.status, l.return_date));
     setCompletedLoans(completed);
 
@@ -173,13 +199,11 @@ export default function StudentPortalPage() {
     setShowRecommendModal(true);
   };
 
-  // Öğrencinin toplam okuduğu sayfa hesabı
   const totalReadPages = completedLoans.reduce(
     (acc, curr) => acc + (Number(curr.book?.page_count) || 0),
     0
   );
 
-  // Arama & Filtreleme Listesi
   const filteredBooks = books.filter((b) => {
     const matchSearch =
       b.title?.toLowerCase().includes(search.toLowerCase()) ||
@@ -188,9 +212,7 @@ export default function StudentPortalPage() {
     return matchSearch && matchShelf;
   });
 
-  // =========================================================================
-  // GİRİŞ EKRANI (Öğrenci Giriş Yapmamışsa)
-  // =========================================================================
+  // GİRİŞ EKRANI
   if (!currentStudent) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 antialiased selection:bg-indigo-500 selection:text-white">
@@ -249,12 +271,9 @@ export default function StudentPortalPage() {
     );
   }
 
-  // =========================================================================
   // ÖĞRENCİ ANA PANELİ
-  // =========================================================================
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-16 antialiased">
-      {/* 1. ÜST COMMAND BAR */}
       <header className="bg-white border-b border-slate-200/80 sticky top-0 z-40 shadow-2xs">
         <div className="max-w-6xl mx-auto px-4 py-3.5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -292,8 +311,6 @@ export default function StudentPortalPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 pt-6 space-y-6">
-        
-        {/* 2. KİŞİSEL OKUMA MASASI & İSTATİSTİK ÖZETİ */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white p-5 rounded-3xl border border-slate-200/90 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Şu An Elimde</span>
@@ -318,7 +335,6 @@ export default function StudentPortalPage() {
           </div>
         </div>
 
-        {/* 3. ŞU AN ELİNDE OLAN KİTAP VE İADE TAKİBİ */}
         {activeLoans.length > 0 && (
           <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-3xl p-5 text-white shadow-md">
             <div className="flex items-center gap-2 mb-3">
@@ -351,7 +367,6 @@ export default function StudentPortalPage() {
           </div>
         )}
 
-        {/* 4. MODÜL SEKMELERİ */}
         <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
           <button
             onClick={() => setActiveTab('catalog')}
@@ -385,7 +400,6 @@ export default function StudentPortalPage() {
           </button>
         </div>
 
-        {/* 5. TAB 1: KİTAP KATALOĞU */}
         {activeTab === 'catalog' && (
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -488,7 +502,6 @@ export default function StudentPortalPage() {
           </div>
         )}
 
-        {/* 6. TAB 2: OKUMA GEÇMİŞİM */}
         {activeTab === 'history' && (
           <div className="bg-white rounded-3xl border border-slate-200/90 p-5 shadow-2xs space-y-3">
             <h3 className="text-sm font-bold text-slate-900">Tamamladığın Kitaplar</h3>
@@ -531,7 +544,6 @@ export default function StudentPortalPage() {
           </div>
         )}
 
-        {/* 7. TAB 3: FAVORİLERİM */}
         {activeTab === 'favorites' && (
           <div className="space-y-4">
             <h3 className="text-sm font-bold text-slate-900">Okumak İstediğin Favori Kitaplar</h3>
@@ -566,7 +578,6 @@ export default function StudentPortalPage() {
         )}
       </main>
 
-      {/* ⭐ BANA KİTAP ÖNER MODALI */}
       {showRecommendModal && recommendedBook && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-sm w-full p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
