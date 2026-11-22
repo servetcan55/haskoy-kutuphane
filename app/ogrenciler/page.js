@@ -8,6 +8,7 @@ import { useRouteGuard } from '../../lib/useRouteGuard';
 export default function StudentsPage() {
   const { user, loading: guardLoading, authorized, permissions } = useRouteGuard();
   const canManageStudents = Boolean(permissions?.can_manage_students);
+  const canDeleteStudents = user?.role === 'admin' || Boolean(permissions?.can_delete_student);
 
   const [students, setStudents] = useState([]);
   const [selectedClass, setSelectedClass] = useState('ALL');
@@ -142,9 +143,9 @@ export default function StudentsPage() {
     setLoading(false);
   };
 
-  // Öğrenci Silme
+  // Öğrenci Silme (Yalnızca admin veya can_delete_student iznine sahip kullanıcılar)
   const handleDeleteStudent = async (id, name) => {
-    if (!canManageStudents) {
+    if (!canDeleteStudents) {
       setMessage({ text: 'Öğrenci silme yetkiniz bulunmuyor.', type: 'error' });
       return;
     }
@@ -553,7 +554,7 @@ export default function StudentsPage() {
                   >
                     Karnesi →
                   </Link>
-                  {canManageStudents && (
+                  {canDeleteStudents && (
                     <>
                       <span className="text-slate-200">|</span>
                       <button
