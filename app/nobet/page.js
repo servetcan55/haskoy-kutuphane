@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
+import { useStaffAuth } from '@/lib/useStaffAuth';
 
 const AYLAR = {
   ocak: 1,
@@ -111,28 +112,13 @@ function formatDisplayDate(rawDate, isoDate) {
 }
 
 export default function NobetYonetimPage() {
-  const [user, setUser] = useState(null);
-  const [authChecking, setAuthChecking] = useState(true);
+  const { user, loading: authChecking } = useStaffAuth();
   const [duties, setDuties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [replaceExisting, setReplaceExisting] = useState(true);
   const [message, setMessage] = useState({ text: '', type: '' });
   const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user);
-      setAuthChecking(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setAuthChecking(false);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
 
   const loadDuties = async () => {
     setLoading(true);
@@ -152,8 +138,10 @@ export default function NobetYonetimPage() {
   useEffect(() => {
     if (user) {
       loadDuties();
+    } else if (!authChecking) {
+      setLoading(false);
     }
-  }, [user]);
+  }, [user, authChecking]);
 
   const handleDownloadSampleExcel = () => {
     const sampleRows = [
@@ -201,7 +189,6 @@ export default function NobetYonetimPage() {
       const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
       const formattedRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
 
-      // Gerçek tablo başlık satırını bul: "tarih" sütunu ve en az bir sınıf/nöbetçi sütunu içermeli
       let headerIdx = -1;
       for (let i = 0; i < Math.min(rawRows.length, 20); i++) {
         const normalizedCells = (formattedRows[i] || rawRows[i] || []).map((c) => normalizeTr(c));
@@ -241,7 +228,6 @@ export default function NobetYonetimPage() {
         const rawTarih = colIndex.tarih >= 0 ? rawRow[colIndex.tarih] : '';
         const fmtTarih = colIndex.tarih >= 0 ? fmtRow[colIndex.tarih] : '';
 
-        // Tekrarlayan alt başlık satırlarını atla
         const normTarih = normalizeTr(fmtTarih);
         if (!normTarih || normTarih === 'tarih' || normTarih === 'sira') continue;
 
