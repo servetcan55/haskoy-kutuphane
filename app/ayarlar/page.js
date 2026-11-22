@@ -2,7 +2,10 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { useRouteGuard } from '@/lib/useRouteGuard';
 import { useStaffAuth } from '@/lib/useStaffAuth';
+
+const VALID_DENSITIES = ['compact', 'normal', 'spacious'];
 
 const DEFAULT_QUOTES = [
   { text: 'Kitapsız yaşamak; kör, sağır ve dilsiz yaşamaktır.', author: 'Seneca' },
@@ -29,9 +32,31 @@ const DAYS = [
   { key: 'friday', label: 'Cuma' },
 ];
 
+function getStoredDensity() {
+  if (typeof window === 'undefined') return 'normal';
+  try {
+    const persisted = window.localStorage.getItem('haskoy_sidebar_density_persisted');
+    if (persisted && VALID_DENSITIES.includes(persisted)) return persisted;
+    const current = window.localStorage.getItem('haskoy_sidebar_density');
+    if (current && VALID_DENSITIES.includes(current)) return current;
+  } catch (_) {}
+  return 'normal';
+}
+
+function setStoredDensity(mode) {
+  if (typeof window === 'undefined' || !VALID_DENSITIES.includes(mode)) return;
+  try {
+    window.localStorage.setItem('haskoy_sidebar_density', mode);
+    window.localStorage.setItem('haskoy_sidebar_density_persisted', mode);
+  } catch (_) {}
+  window.dispatchEvent(
+    new CustomEvent('haskoy-sidebar-density-change', { detail: { density: mode } })
+  );
+}
+
 export default function SettingsPage() {
-  // Sadece 'admin' (Yönetici) rolü erişebilir
-  const { user, loading: authLoading, logout } = useStaffAuth('admin');
+  const { user, loading: guardLoading, authorized } = useRouteGuard();
+  const { logout } = useStaffAuth();
 
   // Hedefler & Sözler State'leri
   const [termGoal, setTermGoal] = useState('500');
@@ -63,24 +88,48 @@ export default function SettingsPage() {
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [scheduleMessage, setScheduleMessage] = useState('');
 
+  // Sol Menü Boyutu / Yoğunluğu State'leri
+  const [sidebarDensity, setSidebarDensity] = useState('normal');
+  const [savingDensity, setSavingDensity] = useState(false);
+  const [densityMessage, setDensityMessage] = useState('');
+
+  // İstemci açılışında tarayıcıdaki kayıtlı menü yoğunluğunu anında uygula
   useEffect(() => {
-    loadSettings();
+    const initial = getStoredDensity();
+    setSidebarDensity(initial);
   }, []);
 
   const loadSettings = async () => {
-    const [goalRes, pageGoalRes, quotesRes, scheduleRes, directorRes, teacherRes] = await Promise.all([
+    const [goalRes, pageGoalRes, quotesRes, scheduleRes, directorRes, teacherRes, densityRes] = await Promise.all([
       supabase.from('settings').select('value').eq('id', 'term_goal').maybeSingle(),
       supabase.from('settings').select('value').eq('id', 'term_page_goal').maybeSingle(),
       supabase.from('settings').select('value').eq('id', 'kiosk_quotes').maybeSingle(),
       supabase.from('settings').select('value').eq('id', 'library_schedule').maybeSingle(),
       supabase.from('settings').select('value').eq('id', 'school_director').maybeSingle(),
       supabase.from('settings').select('value').eq('id', 'library_teacher').maybeSingle(),
+      supabase.from('settings').select('value').eq('id', 'sidebar_density').maybeSingle(),
     ]);
 
     if (goalRes.data?.value) setTermGoal(goalRes.data.value);
     if (pageGoalRes.data?.value) setTermPageGoal(pageGoalRes.data.value);
     if (directorRes.data?.value) setSchoolDirector(directorRes.data.value);
     if (teacherRes.data?.value) setLibraryTeacher(teacherRes.data.value);
+
+    const localSaved = getStoredDensity();
+    let hasExplicitLocal = false;
+    try {
+      hasExplicitLocal = Boolean(window.localStorage.getItem('haskoy_sidebar_density_persisted'));
+    } catch (_) {}
+
+    if (hasExplicitLocal && VALID_DENSITIES.includes(localSaved)) {
+      setSidebarDensity(localSaved);
+      setStoredDensity(localSaved);
+    } else if (densityRes.data?.value && VALID_DENSITIES.includes(densityRes.data.value)) {
+      setSidebarDensity(densityRes.data.value);
+      setStoredDensity(densityRes.data.value);
+    } else {
+      setSidebarDensity(localSaved);
+    }
 
     if (quotesRes.data?.value) {
       try {
@@ -100,6 +149,44 @@ export default function SettingsPage() {
         console.error('Çizelge okunamadı:', e);
       }
     }
+  };
+
+  useEffect(() => {
+    if (!guardLoading && user && authorized) {
+      loadSettings();
+    }
+  }, [guardLoading, user, authorized]);
+
+  // Sol menü yoğunluğunu anında önizleme + kalıcı saklama
+  const handleDensitySelect = (mode) => {
+    setSidebarDensity(mode);
+    setStoredDensity(mode);
+  };
+
+  const handleSaveDensity = async (e) => {
+    e.preventDefault();
+    setSavingDensity(true);
+    setDensityMessage('');
+    setStoredDensity(sidebarDensity);
+
+    const { error } = await supabase
+      .from('settings')
+      .upsert(
+        {
+          id: 'sidebar_density',
+          value: sidebarDensity,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      );
+
+    setSavingDensity(false);
+    if (error) {
+      setDensityMessage(`✓ Tarayıcı tercihiniz kaydedildi (${sidebarDensity}). (Veritabanı notu: ${error.message})`);
+    } else {
+      setDensityMessage('✓ Sol menü yoğunluğu ayarı kaydedildi!');
+    }
+    setTimeout(() => setDensityMessage(''), 4000);
   };
 
   // 1. Karne İmza Yetkililerini Kaydetme
@@ -217,11 +304,29 @@ export default function SettingsPage() {
     }
   };
 
-  // Yetki doğrulanırken bekleme ekranı
-  if (authLoading) {
+  if (guardLoading) {
     return (
       <div className="p-16 text-center text-xs font-mono text-slate-400">
-        Yönetici yetkisi doğrulanıyor...
+        Yetki kontrol ediliyor...
+      </div>
+    );
+  }
+
+  if (!user || !authorized) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center">
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
+          <span className="text-3xl">🔒</span>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
+          <p className="text-xs text-slate-500">
+            Bulunduğunuz kullanıcı grubu Sistem Ayarları ekranını görüntülemek için yetkilendirilmemiş.
+          </p>
+          <div className="pt-2">
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+              ← Ana Sayfaya Dön
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -233,17 +338,16 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight">Sistem & Kütüphane Ayarları</h1>
           <p className="text-xs text-slate-500 mt-1">
-            Karne imza yetkililerini, canlı pano hedeflerini, haftalık şube ziyaret çizelgesini ve günün sözlerini buradan yönetebilirsiniz.
+            Sol menü görünümünü, karne imza yetkililerini, canlı pano hedeflerini, haftalık şube ziyaret çizelgesini ve günün sözlerini buradan yönetebilirsiniz.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Giriş Yapan Yönetici Rozeti */}
           {user && (
             <div className="flex items-center gap-2 bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-2xl">
               <span className="text-xs font-bold text-slate-800">{user.full_name}</span>
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300">
-                👑 Yönetici
+                {user.role === 'admin' ? '👑 Yönetici' : `🛡️ ${user.role}`}
               </span>
               <button
                 onClick={logout}
@@ -262,6 +366,87 @@ export default function SettingsPage() {
             ← <span>Ana Sayfa</span>
           </Link>
         </div>
+      </div>
+
+      {/* 0. SOL MENÜ BOYUTU & YOĞUNLUĞU AYARI */}
+      <div className="bg-white rounded-3xl border border-slate-200/90 p-6 shadow-sm">
+        <div className="flex items-center gap-2 pb-3 border-b border-slate-100 mb-5">
+          <span className="text-base p-1.5 rounded-xl bg-slate-100 text-slate-700 border border-slate-200">📐</span>
+          <div>
+            <h2 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+              Sol Menü Boyutu & Yoğunluğu
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Tüm menü linkleri açıkken alt kullanıcı profilinin ve ekran sığmasının nasıl davranacağını seçin.
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSaveDensity} className="space-y-4 max-w-2xl">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[
+              {
+                id: 'compact',
+                title: 'Kompakt',
+                desc: 'Sıkı aralık, küçük ekranlarda ekstra boşluk',
+              },
+              {
+                id: 'normal',
+                title: 'Normal (Önerilen)',
+                desc: 'Dengeli boyut, kaydırma çubuğu çıkmadan tam oturur',
+              },
+              {
+                id: 'spacious',
+                title: 'Geniş',
+                desc: 'Daha iri yazı ve geniş satır boşluğu',
+              },
+            ].map((opt) => {
+              const active = sidebarDensity === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => handleDensitySelect(opt.id)}
+                  className={`p-3.5 rounded-2xl border text-left transition cursor-pointer ${
+                    active
+                      ? 'bg-blue-50/80 border-blue-500 ring-2 ring-blue-500/20'
+                      : 'bg-slate-50 border-slate-200 hover:bg-slate-100/70'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-slate-900">{opt.title}</span>
+                    {active && (
+                      <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                        Aktif
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1 leading-snug">{opt.desc}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          {densityMessage && (
+            <div
+              className={`p-3 rounded-xl text-xs font-semibold ${
+                densityMessage.startsWith('✓')
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : 'bg-rose-50 text-rose-700 border border-rose-200'
+              }`}
+            >
+              {densityMessage}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={savingDensity}
+            className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-sm transition cursor-pointer disabled:opacity-50"
+          >
+            {savingDensity ? 'Kaydediliyor...' : 'Menü Boyutunu Kaydet'}
+          </button>
+        </form>
       </div>
 
       {/* 1. RESMİ KARNE İMZA YETKİLİLERİ AYARI */}

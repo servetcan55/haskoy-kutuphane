@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import JsBarcode from 'jsbarcode';
 import { supabase } from '@/lib/supabase';
+import { useRouteGuard } from '@/lib/useRouteGuard';
 
 function StudentBarcode({ value }) {
   const svgRef = useRef(null);
@@ -28,11 +29,14 @@ function StudentBarcode({ value }) {
 }
 
 export default function StudentCardsPage() {
+  const { user, loading: guardLoading, authorized } = useRouteGuard();
   const [students, setStudents] = useState([]);
   const [selectedClass, setSelectedClass] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (guardLoading || !user || !authorized) return;
+
     const fetchStudents = async () => {
       setLoading(true);
       const { data } = await supabase
@@ -43,7 +47,30 @@ export default function StudentCardsPage() {
       setLoading(false);
     };
     fetchStudents();
-  }, []);
+  }, [guardLoading, user, authorized]);
+
+  if (guardLoading) {
+    return <div className="p-8 text-center text-xs text-slate-400">Yetki kontrol ediliyor...</div>;
+  }
+
+  if (!user || !authorized) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center">
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
+          <span className="text-3xl">🔒</span>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
+          <p className="text-xs text-slate-500">
+            Bulunduğunuz kullanıcı grubu Öğrenci Kartları ekranını görüntülemek için yetkilendirilmemiş.
+          </p>
+          <div className="pt-2">
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+              ← Ana Sayfaya Dön
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const classes = Array.from(new Set(students.map((s) => s.grade_class).filter(Boolean))).sort();
 
@@ -53,36 +80,26 @@ export default function StudentCardsPage() {
 
   return (
     <>
-      {/* 
-        BU CSS BLOĞU YAZDIRMA SORUNLARINI KÖKÜNDEN ÇÖZER:
-        - Yan menü boşluklarını sıfırlar
-        - Sayfayı kâğıdın tam sol-üst köşesine (0,0) sabitler
-        - Dikey kaydırma çubuğunu (scrollbar) zorla yok eder
-        - Tarayıcının URL ve Tarih eklemesini (header/footer) kaldırır
-      */}
       <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 5mm; /* Header ve footer'ı yok ederken güvenli baskı payı bırakır */
+            margin: 5mm;
           }
-          
-          /* Tüm ekran kısıtlamalarını ve kaydırma çubuklarını yıkıyoruz */
+
           html, body {
             background-color: white !important;
             margin: 0 !important;
             padding: 0 !important;
             width: 100% !important;
             height: auto !important;
-            overflow: visible !important; /* Dikey scroll'u kaldırır */
+            overflow: visible !important;
           }
 
-          /* Ana layout'taki tüm hizalamaları (sidebar boşluğu dahil) sıfırlarız */
           body, main, div {
             position: static !important;
           }
 
-          /* Yazdırma Kapsayıcısı: Kâğıdın sınırlarına %100 hükmeder */
           .print-full-width-container {
             display: block !important;
             position: absolute !important;
@@ -102,9 +119,7 @@ export default function StudentCardsPage() {
         }
       `}</style>
 
-      {/* Ana Kapsayıcıya Yazdırma İçin Özel Sınıf (print-full-width-container) Ekliyoruz */}
       <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto antialiased print-full-width-container">
-        
         {/* Yazdırmada Gizlenecek Kontrol Alanı (Üst Başlık ve Filtreler) */}
         <div className="print:hidden space-y-4 pb-4 border-b border-slate-200/80">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -170,7 +185,6 @@ export default function StudentCardsPage() {
                 key={st.id}
                 className="bg-white border-2 border-slate-300 rounded-3xl p-4 flex flex-col justify-between h-52 relative overflow-hidden shadow-xs print:shadow-none print:border-slate-400 break-inside-avoid"
               >
-                {/* Kart Üst Başlık & Okul İsmi */}
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-xs">
@@ -186,7 +200,6 @@ export default function StudentCardsPage() {
                   </span>
                 </div>
 
-                {/* Öğrenci Bilgileri */}
                 <div className="flex items-center gap-3 my-2">
                   <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-slate-100 to-slate-200 border border-slate-300 flex items-center justify-center font-black text-slate-600 text-base shrink-0">
                     {st.full_name?.charAt(0)}
@@ -199,7 +212,6 @@ export default function StudentCardsPage() {
                   </div>
                 </div>
 
-                {/* Barkod */}
                 <div className="border-t border-slate-100 pt-1.5 flex flex-col items-center justify-center">
                   <StudentBarcode value={st.student_number} />
                 </div>

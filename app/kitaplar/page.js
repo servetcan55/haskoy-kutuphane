@@ -2,10 +2,12 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
+import { useRouteGuard } from '../../lib/useRouteGuard';
 
 const PAGE_SIZE = 50;
 
 export default function KitaplarPage() {
+  const { user, loading: guardLoading, authorized, permissions } = useRouteGuard();
   const [books, setBooks] = useState([]);
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -19,8 +21,14 @@ export default function KitaplarPage() {
   });
 
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState(null);
   const [message, setMessage] = useState({ text: '', type: '' });
+
+  // Grup işlem izinleri
+  const groupPerms = {
+    can_add_book: Boolean(permissions?.can_add_book),
+    can_edit_book: Boolean(permissions?.can_edit_book),
+    can_delete_book: Boolean(permissions?.can_delete_book),
+  };
 
   // Düzenleme Modalı State'leri
   const [editingBook, setEditingBook] = useState(null);
@@ -37,16 +45,6 @@ export default function KitaplarPage() {
     cover_url: '',
   });
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
 
   // Sıralama değiştiğinde tarayıcı hafızasına kaydediyoruz ve 1. sayfaya dönüyoruz
   const handleSortChange = (newSort) => {
@@ -93,7 +91,7 @@ export default function KitaplarPage() {
         if (data && data.length > 0) {
           allBooks = [...allBooks, ...data];
           if (data.length < step) {
-            keepFetching = false; // Son blok
+            keepFetching = false;
           } else {
             from += step;
             to += step;
@@ -111,10 +109,41 @@ export default function KitaplarPage() {
   };
 
   useEffect(() => {
-    loadBooks();
-  }, []);
+    if (!guardLoading && user && authorized) {
+      loadBooks();
+    } else if (!guardLoading) {
+      setLoading(false);
+    }
+  }, [guardLoading, user, authorized]);
+
+  if (guardLoading) {
+    return <div className="p-8 text-center text-xs text-slate-400">Yetki kontrol ediliyor...</div>;
+  }
+
+  if (!user || !authorized) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center">
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
+          <span className="text-3xl">🔒</span>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
+          <p className="text-xs text-slate-500">
+            Bulunduğunuz kullanıcı grubu Kitap Envanteri ekranını görüntülemek için yetkilendirilmemiş.
+          </p>
+          <div className="pt-2">
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+              ← Ana Sayfaya Dön
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleDeleteBook = async (id, title) => {
+    if (!groupPerms.can_delete_book) {
+      setMessage({ text: 'Bu işlem için kitap silme yetkiniz bulunmuyor.', type: 'error' });
+      return;
+    }
     if (!confirm(`"${title}" isimli kitabı kütüphaneden kalıcı olarak silmek istediğinize emin misiniz?`)) return;
 
     await supabase.from('loans').delete().eq('book_id', id);
@@ -129,6 +158,7 @@ export default function KitaplarPage() {
   };
 
   const openEditModal = (book) => {
+    if (!groupPerms.can_edit_book) return;
     setEditingBook(book);
     setEditForm({
       demirbas_no: book.demirbas_no || '',
@@ -146,7 +176,7 @@ export default function KitaplarPage() {
 
   const handleUpdateBook = async (e) => {
     e.preventDefault();
-    if (!editingBook) return;
+    if (!editingBook || !groupPerms.can_edit_book) return;
 
     setSaving(true);
     const { error } = await supabase
@@ -175,7 +205,6 @@ export default function KitaplarPage() {
     setSaving(false);
   };
 
-  // Filtreleme ve Sıralama Mantığı (Demirbaş numarası olmayanlar otomatik olarak en alta atılır)
   const filteredBooks = books.filter((b) =>
     b.title?.toLowerCase().includes(search.toLowerCase()) ||
     b.author?.toLowerCase().includes(search.toLowerCase()) ||
@@ -212,7 +241,6 @@ export default function KitaplarPage() {
     return 0;
   });
 
-  // 50'lik Sayfalama Hesaplamaları
   const totalPages = Math.max(1, Math.ceil(filteredBooks.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const startIndex = (safePage - 1) * PAGE_SIZE;
@@ -328,18 +356,23 @@ export default function KitaplarPage() {
           >
             🏷️ <span>Barkod Bas</span>
           </Link>
-          <Link
-            href="/kitap-ekle/toplu"
-            className="text-xs font-semibold bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-800 px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
-          >
-            📁 <span>Toplu Yükle (Excel)</span>
-          </Link>
-          <Link
-            href="/kitap-ekle"
-            className="text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl transition shadow-md shadow-blue-500/20 flex items-center gap-1.5"
-          >
-            ➕ <span>Yeni Kitap Ekle</span>
-          </Link>
+
+          {groupPerms.can_add_book && (
+            <>
+              <Link
+                href="/kitap-ekle/toplu"
+                className="text-xs font-semibold bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 text-emerald-800 px-4 py-2.5 rounded-xl transition flex items-center gap-1.5"
+              >
+                📁 <span>Toplu Yükle (Excel)</span>
+              </Link>
+              <Link
+                href="/kitap-ekle"
+                className="text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl transition shadow-md shadow-blue-500/20 flex items-center gap-1.5"
+              >
+                ➕ <span>Yeni Kitap Ekle</span>
+              </Link>
+            </>
+          )}
         </div>
       </div>
 
@@ -368,7 +401,6 @@ export default function KitaplarPage() {
           />
         </div>
 
-        {/* Sıralama Seçenekleri Dropdown */}
         <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-bold text-slate-500">Sırala:</span>
@@ -476,21 +508,29 @@ export default function KitaplarPage() {
                       {inStock ? `Rafta: ${b.available_copies} adet` : 'Tümü Emanette'}
                     </span>
 
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => openEditModal(b)}
-                        className="text-xs font-semibold text-slate-600 hover:text-blue-600 hover:bg-blue-50 px-2.5 py-1 rounded-lg transition cursor-pointer"
-                      >
-                        Düzenle
-                      </button>
-                      <span className="text-slate-200">|</span>
-                      <button
-                        onClick={() => handleDeleteBook(b.id, b.title)}
-                        className="text-xs font-semibold text-slate-400 hover:text-rose-600 hover:bg-rose-50 px-2.5 py-1 rounded-lg transition cursor-pointer"
-                      >
-                        Sil
-                      </button>
-                    </div>
+                    {(groupPerms.can_edit_book || groupPerms.can_delete_book) && (
+                      <div className="flex items-center gap-1">
+                        {groupPerms.can_edit_book && (
+                          <button
+                            onClick={() => openEditModal(b)}
+                            className="text-xs font-semibold text-slate-600 hover:text-blue-600 hover:bg-blue-50 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                          >
+                            Düzenle
+                          </button>
+                        )}
+                        {groupPerms.can_edit_book && groupPerms.can_delete_book && (
+                          <span className="text-slate-200">|</span>
+                        )}
+                        {groupPerms.can_delete_book && (
+                          <button
+                            onClick={() => handleDeleteBook(b.id, b.title)}
+                            className="text-xs font-semibold text-slate-400 hover:text-rose-600 hover:bg-rose-50 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                          >
+                            Sil
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -503,7 +543,7 @@ export default function KitaplarPage() {
       {!loading && filteredBooks.length > 0 && renderPaginationBar()}
 
       {/* Kitap Düzenleme Modalı */}
-      {editingBook && (
+      {editingBook && groupPerms.can_edit_book && (
         <div className="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">

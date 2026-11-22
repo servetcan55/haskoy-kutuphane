@@ -2,8 +2,10 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { useRouteGuard } from '@/lib/useRouteGuard';
 
 export default function LoanDeskPage() {
+  const { user, loading: guardLoading, authorized } = useRouteGuard();
   const [students, setStudents] = useState([]);
   const [books, setBooks] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState(null);
@@ -51,6 +53,8 @@ export default function LoanDeskPage() {
   };
 
   useEffect(() => {
+    if (guardLoading || !user || !authorized) return;
+
     const fetchData = async () => {
       try {
         const [allStudents, allBooks] = await Promise.all([
@@ -64,7 +68,30 @@ export default function LoanDeskPage() {
       }
     };
     fetchData();
-  }, []);
+  }, [guardLoading, user, authorized]);
+
+  if (guardLoading) {
+    return <div className="p-8 text-center text-xs text-slate-400">Yetki kontrol ediliyor...</div>;
+  }
+
+  if (!user || !authorized) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center">
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
+          <span className="text-3xl">🔒</span>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
+          <p className="text-xs text-slate-500">
+            Bulunduğunuz kullanıcı grubu Ödünç Masası ekranını görüntülemek için yetkilendirilmemiş.
+          </p>
+          <div className="pt-2">
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+              ← Ana Sayfaya Dön
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const normalizedBookQuery = bookSearch.toLowerCase().trim();
 

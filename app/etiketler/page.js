@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import JsBarcode from 'jsbarcode';
 import { supabase } from '@/lib/supabase';
+import { useRouteGuard } from '@/lib/useRouteGuard';
 
 function BarcodeItem({ value }) {
   const svgRef = useRef(null);
@@ -12,7 +13,7 @@ function BarcodeItem({ value }) {
       try {
         // Barkod için güvenli string oluşturma ve geçersiz karakterleri temizleme
         const safeValue = String(value || '').replace(/[^a-zA-Z0-9-_]/g, '').trim();
-        
+
         if (safeValue.length > 0) {
           JsBarcode(svgRef.current, safeValue, {
             format: 'CODE128',
@@ -33,6 +34,7 @@ function BarcodeItem({ value }) {
 }
 
 export default function LabelsPage() {
+  const { user, loading: guardLoading, authorized } = useRouteGuard();
   const [books, setBooks] = useState([]);
   const [selectedBooks, setSelectedBooks] = useState([]);
   const [search, setSearch] = useState('');
@@ -40,6 +42,8 @@ export default function LabelsPage() {
 
   // 1000 kayıt sınırını aşarak tüm kitapları (2576+) döngüyle çeken fonksiyon
   useEffect(() => {
+    if (guardLoading || !user || !authorized) return;
+
     const fetchBooks = async () => {
       setLoading(true);
       try {
@@ -79,7 +83,30 @@ export default function LabelsPage() {
     };
 
     fetchBooks();
-  }, []);
+  }, [guardLoading, user, authorized]);
+
+  if (guardLoading) {
+    return <div className="p-8 text-center text-xs text-slate-400">Yetki kontrol ediliyor...</div>;
+  }
+
+  if (!user || !authorized) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center">
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
+          <span className="text-3xl">🔒</span>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
+          <p className="text-xs text-slate-500">
+            Bulunduğunuz kullanıcı grubu Barkod & Etiket sayfasını görüntülemek için yetkilendirilmemiş.
+          </p>
+          <div className="pt-2">
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+              ← Ana Sayfaya Dön
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const toggleSelectBook = (id) => {
     setSelectedBooks((prev) =>
@@ -111,7 +138,7 @@ export default function LabelsPage() {
             size: A4 portrait;
             margin: 5mm;
           }
-          
+
           html, body {
             background-color: white !important;
             margin: 0 !important;
@@ -145,10 +172,8 @@ export default function LabelsPage() {
       `}</style>
 
       <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto antialiased print-full-width-container">
-        
         {/* YAZDIRMA ESNASINDA GİZLENECEK KONTROL MERKEZİ */}
         <div className="print:hidden space-y-6">
-          
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-200/80">
             <div>
               <div className="flex items-center gap-2">

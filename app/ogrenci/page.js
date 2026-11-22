@@ -4,12 +4,20 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { getAcademicInfo } from '@/lib/academic';
 
+function normalizeClassValue(val) {
+  return String(val ?? '')
+    .normalize('NFKC')
+    .replace(/\s+/g, '')
+    .toLocaleUpperCase('tr-TR');
+}
+
 export default function StudentPortalPage() {
   const currentAcademic = getAcademicInfo();
 
   // Oturum State'leri
   const [currentStudent, setCurrentStudent] = useState(null);
   const [inputNo, setInputNo] = useState('');
+  const [inputClass, setInputClass] = useState('');
   const [loginError, setLoginError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -18,12 +26,12 @@ export default function StudentPortalPage() {
   const [books, setBooks] = useState([]);
   const [activeLoans, setActiveLoans] = useState([]);
   const [completedLoans, setCompletedLoans] = useState([]);
-  const [favorites, setFavorites] = useState([]); // book_id array
+  const [favorites, setFavorites] = useState([]);
 
   // Filtreleme & Arama
   const [search, setSearch] = useState('');
-  const [filterShelf, setFilterShelf] = useState('all'); // 'all', 'available'
-  const [activeTab, setActiveTab] = useState('catalog'); // 'catalog', 'history', 'favorites'
+  const [filterShelf, setFilterShelf] = useState('all');
+  const [activeTab, setActiveTab] = useState('catalog');
 
   // "Bana Kitap Öner" Modal State'i
   const [recommendedBook, setRecommendedBook] = useState(null);
@@ -35,7 +43,7 @@ export default function StudentPortalPage() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed?.id) {
+        if (parsed?.id && parsed?.grade_class) {
           fetchStudentProfile(parsed.id);
         }
       } catch (e) {
@@ -101,7 +109,6 @@ export default function StudentPortalPage() {
       return (s.includes('iade') || s.includes('return') || s.includes('teslim') || s.includes('tamam')) && !s.includes('kayıp');
     };
 
-    // Hangi kitaplar şu an emanette?
     const activeLoanBookIds = new Set(
       rawLoans.filter((l) => !isReturned(l.status, l.return_date)).map((l) => String(l.book_id))
     );
@@ -113,7 +120,6 @@ export default function StudentPortalPage() {
     }));
     setBooks(processedBooks);
 
-    // Öğrencinin kendi hareketleri
     const myRawLoans = rawLoans.filter((l) => String(l.student_id) === String(studentId));
 
     const myLoans = myRawLoans.map((l) => {
@@ -130,10 +136,16 @@ export default function StudentPortalPage() {
     setLoading(false);
   };
 
-  // 3. Okul Numarasıyla Giriş Yap
+  // 3. Okul Numarası ve Sınıf/Şube ile Doğrulanmış Giriş Yap
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!inputNo.trim()) return;
+    const cleanNo = inputNo.trim();
+    const cleanClass = normalizeClassValue(inputClass);
+
+    if (!cleanNo || !cleanClass) {
+      setLoginError('Lütfen okul numaranızı ve sınıf/şubenizi (örneğin 6A) birlikte girin.');
+      return;
+    }
 
     setAuthLoading(true);
     setLoginError('');
@@ -141,16 +153,25 @@ export default function StudentPortalPage() {
     const { data, error } = await supabase
       .from('students')
       .select('*')
-      .eq('student_number', inputNo.trim())
-      .maybeSingle();
+      .eq('student_number', cleanNo);
 
     setAuthLoading(false);
 
-    if (error || !data) {
-      setLoginError('Bu okul numarasıyla kayıtlı öğrenci bulunamadı. Lütfen kütüphaneciye danışın.');
-    } else {
-      fetchStudentProfile(data.id);
+    if (error || !data || data.length === 0) {
+      setLoginError('Okul numarası veya sınıf/şube bilgisi eşleşmedi. Lütfen kontrol edin.');
+      return;
     }
+
+    const matchedStudent = data.find(
+      (st) => normalizeClassValue(st.grade_class) === cleanClass
+    );
+
+    if (!matchedStudent) {
+      setLoginError('Okul numarası ile sınıf/şube bilgisi eşleşmedi. Lütfen kendi sınıf/şubenizi girin.');
+      return;
+    }
+
+    fetchStudentProfile(matchedStudent.id);
   };
 
   // 4. Çıkış Yap
@@ -158,6 +179,7 @@ export default function StudentPortalPage() {
     localStorage.removeItem('haskoy_student_session');
     setCurrentStudent(null);
     setInputNo('');
+    setInputClass('');
   };
 
   // 5. Favoriye Ekle / Çıkar
@@ -223,7 +245,7 @@ export default function StudentPortalPage() {
 
           <div>
             <span className="text-[11px] font-bold tracking-widest uppercase text-indigo-400">
-              Hasköy Ortaokulu Kütüphanesi
+              Hasköy Ortaokulu Kütüphanesi • {currentAcademic.academicYear}
             </span>
             <h1 className="text-2xl font-black text-white tracking-tight mt-1">Öğrenci Okur Portalı</h1>
             <p className="text-xs text-slate-400 mt-1">
@@ -232,18 +254,34 @@ export default function StudentPortalPage() {
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4 text-left">
-            <div>
-              <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                Okul Numaranız
-              </label>
-              <input
-                type="number"
-                placeholder="Örn: 125"
-                value={inputNo}
-                onChange={(e) => setInputNo(e.target.value)}
-                required
-                className="w-full text-base font-bold p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 focus:border-indigo-500 outline-none transition font-mono"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Okul Numaranız
+                </label>
+                <input
+                  type="number"
+                  placeholder="Örn: 125"
+                  value={inputNo}
+                  onChange={(e) => setInputNo(e.target.value)}
+                  required
+                  className="w-full text-base font-bold p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 focus:border-indigo-500 outline-none transition font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Sınıf / Şube
+                </label>
+                <input
+                  type="text"
+                  placeholder="Örn: 6A"
+                  value={inputClass}
+                  onChange={(e) => setInputClass(e.target.value)}
+                  required
+                  className="w-full text-base font-bold p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 focus:border-indigo-500 outline-none transition uppercase"
+                />
+              </div>
             </div>
 
             {loginError && (
@@ -257,7 +295,7 @@ export default function StudentPortalPage() {
               disabled={authLoading}
               className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition cursor-pointer active:scale-95 disabled:opacity-50"
             >
-              {authLoading ? 'Giriş Yapılıyor...' : 'Kitaplığıma Giriş Yap 🚀'}
+              {authLoading ? 'Doğrulanıyor...' : 'Kitaplığıma Giriş Yap 🚀'}
             </button>
           </form>
 

@@ -4,14 +4,16 @@ import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 import { getAcademicInfo, matchesPeriod } from '@/lib/academic';
+import { useRouteGuard } from '@/lib/useRouteGuard';
 
 export default function StatisticsPage() {
+  const { user, loading: guardLoading, authorized } = useRouteGuard();
   const [period, setPeriod] = useState('month'); // Varsayılan olarak 'Bu Ay' seçili başlar
   const currentAcademic = getAcademicInfo();
 
   const [loading, setLoading] = useState(true);
-  const [studentTab, setStudentTab] = useState('books'); 
-  const [classTab, setClassTab] = useState('books'); 
+  const [studentTab, setStudentTab] = useState('books');
+  const [classTab, setClassTab] = useState('books');
 
   const [topStudentsByBooks, setTopStudentsByBooks] = useState([]);
   const [topStudentsByPages, setTopStudentsByPages] = useState([]);
@@ -38,6 +40,8 @@ export default function StatisticsPage() {
   });
 
   useEffect(() => {
+    if (guardLoading || !user || !authorized) return;
+
     const fetchAnalytics = async () => {
       setLoading(true);
 
@@ -99,7 +103,7 @@ export default function StatisticsPage() {
           new Set(students.map((s) => s.grade_class?.trim()).filter(Boolean))
         ).sort();
         setAvailableClasses(uniqueGrades);
-        
+
         if (uniqueGrades.length > 0 && (!selectedPrintGrade || !uniqueGrades.includes(selectedPrintGrade))) {
           setSelectedPrintGrade(uniqueGrades[0]);
         }
@@ -212,7 +216,30 @@ export default function StatisticsPage() {
     };
 
     fetchAnalytics();
-  }, [period]);
+  }, [period, guardLoading, user, authorized]);
+
+  if (guardLoading) {
+    return <div className="p-16 text-center text-slate-400 text-xs font-mono">Yetki kontrol ediliyor...</div>;
+  }
+
+  if (!user || !authorized) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center">
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
+          <span className="text-3xl">🔒</span>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
+          <p className="text-xs text-slate-500">
+            Bulunduğunuz kullanıcı grubu İstatistik & Raporlar ekranını görüntülemek için yetkilendirilmemiş.
+          </p>
+          <div className="pt-2">
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+              ← Ana Sayfaya Dön
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const bookGoalPercent = Math.min(100, Math.round((overview.periodRead / (termGoal || 1)) * 100));
   const pageGoalPercent = Math.min(100, Math.round((overview.periodPages / (termPageGoal || 1)) * 100));
@@ -279,7 +306,6 @@ export default function StatisticsPage() {
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Şube Karnesi Yazdır / PDF Alanı */}
           <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
             <select
               value={selectedPrintGrade}
@@ -301,7 +327,6 @@ export default function StatisticsPage() {
             </Link>
           </div>
 
-          {/* e-Okul Excel İndir */}
           <button
             onClick={exportEOkulReport}
             className="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2.5 rounded-2xl transition shadow-md shadow-emerald-600/20 flex items-center gap-1.5 cursor-pointer active:scale-95"
@@ -439,7 +464,6 @@ export default function StatisticsPage() {
         <div className="p-16 text-center text-slate-400 text-xs font-mono">İstatistikler hesaplanıyor...</div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
           {/* 1. Sütun: Kitap Kurtları */}
           <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/90 shadow-2xs p-5 flex flex-col justify-between">
             <div>
@@ -636,7 +660,6 @@ export default function StatisticsPage() {
               )}
             </div>
           </div>
-
         </div>
       )}
     </div>

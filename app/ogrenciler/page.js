@@ -3,8 +3,12 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import { supabase } from '../../lib/supabase';
+import { useRouteGuard } from '../../lib/useRouteGuard';
 
 export default function StudentsPage() {
+  const { user, loading: guardLoading, authorized, permissions } = useRouteGuard();
+  const canManageStudents = Boolean(permissions?.can_manage_students);
+
   const [students, setStudents] = useState([]);
   const [selectedClass, setSelectedClass] = useState('ALL');
   const [studentNumber, setStudentNumber] = useState('');
@@ -12,7 +16,7 @@ export default function StudentsPage() {
   const [gradeClass, setGradeClass] = useState('');
   const [gender, setGender] = useState('kiz');
   const [photoUrl, setPhotoUrl] = useState('');
-  
+
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
@@ -36,7 +40,6 @@ export default function StudentsPage() {
       .select('*');
 
     if (!error && data) {
-      // Önce şubeye (grade_class), şube içinde okul numarasına (sayısal) göre sırala
       data.sort((a, b) => {
         const classA = (a.grade_class || '').trim();
         const classB = (b.grade_class || '').trim();
@@ -53,8 +56,10 @@ export default function StudentsPage() {
   };
 
   useEffect(() => {
-    loadStudents();
-  }, []);
+    if (!guardLoading && user && authorized) {
+      loadStudents();
+    }
+  }, [guardLoading, user, authorized]);
 
   const classes = Array.from(new Set(students.map((s) => s.grade_class).filter(Boolean))).sort((a, b) =>
     a.localeCompare(b, 'tr', { numeric: true })
@@ -63,6 +68,10 @@ export default function StudentsPage() {
   // Tekil Öğrenci Ekleme
   const handleAddStudent = async (e) => {
     e.preventDefault();
+    if (!canManageStudents) {
+      setMessage({ text: 'Öğrenci ekleme yetkiniz bulunmuyor.', type: 'error' });
+      return;
+    }
     if (!studentNumber.trim() || !fullName.trim()) {
       setMessage({ text: 'Okul numarası ve ad-soyad zorunludur.', type: 'error' });
       return;
@@ -94,6 +103,7 @@ export default function StudentsPage() {
 
   // Düzenleme Başlat
   const startEdit = (st) => {
+    if (!canManageStudents) return;
     setEditingStudent(st);
     setEditForm({
       id: st.id,
@@ -108,6 +118,7 @@ export default function StudentsPage() {
   // Düzenlemeyi Kaydet
   const handleUpdateStudent = async (e) => {
     e.preventDefault();
+    if (!canManageStudents) return;
     setLoading(true);
 
     const { error } = await supabase
@@ -133,6 +144,10 @@ export default function StudentsPage() {
 
   // Öğrenci Silme
   const handleDeleteStudent = async (id, name) => {
+    if (!canManageStudents) {
+      setMessage({ text: 'Öğrenci silme yetkiniz bulunmuyor.', type: 'error' });
+      return;
+    }
     if (!confirm(`"${name}" isimli öğrenciyi ve kütüphane geçmişini silmek istediğinize emin misiniz?`)) return;
 
     await supabase.from('loans').delete().eq('student_id', id);
@@ -161,6 +176,11 @@ export default function StudentsPage() {
 
   // Excel / CSV Dosyası Okuma & Toplu Yükleme
   const handleFileUpload = async (e) => {
+    if (!canManageStudents) {
+      setMessage({ text: 'Toplu öğrenci yükleme yetkiniz bulunmuyor.', type: 'error' });
+      return;
+    }
+
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -221,7 +241,29 @@ export default function StudentsPage() {
     }
   };
 
-  // Önce seçilen sınıfa, sonra arama kelimesine göre filtrele
+  if (guardLoading) {
+    return <div className="p-8 text-center text-xs text-slate-400">Yetki kontrol ediliyor...</div>;
+  }
+
+  if (!user || !authorized) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center">
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
+          <span className="text-3xl">🔒</span>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
+          <p className="text-xs text-slate-500">
+            Bulunduğunuz kullanıcı grubu Öğrenci Yönetimi ekranını görüntülemek için yetkilendirilmemiş.
+          </p>
+          <div className="pt-2">
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+              ← Ana Sayfaya Dön
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const filteredStudents = students.filter((st) => {
     const matchClass = selectedClass === 'ALL' || st.grade_class === selectedClass;
     const matchSearch =
@@ -270,139 +312,138 @@ export default function StudentsPage() {
         </div>
       )}
 
-      {/* Bento Grid: Excel İçe Aktarma & Tekil Öğrenci Kaydı */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Sol: Excel / CSV Yükleme & Örnek Şablon */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-white p-6 rounded-3xl border border-emerald-200/80 shadow-2xs flex flex-col justify-between space-y-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="p-2 rounded-xl bg-emerald-100/80 text-emerald-700 text-sm">📊</span>
-              <h3 className="text-sm font-bold text-emerald-950">Toplu Excel / CSV Yükle</h3>
-            </div>
-            <p className="text-xs text-emerald-800/80 mt-2 leading-relaxed">
-              e-Okuldan aldığınız listeyi seçerek yüzlerce öğrenciyi tek seferde aktarın.
-            </p>
-          </div>
-
-          <div className="space-y-2.5 pt-2">
-            <input
-              type="file"
-              accept=".xlsx, .xls, .csv"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              className="hidden"
-              id="excel-upload"
-            />
-            <label
-              htmlFor="excel-upload"
-              className={`w-full block text-center py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition cursor-pointer shadow-md shadow-emerald-600/20 ${
-                importLoading ? 'opacity-50 pointer-events-none' : ''
-              }`}
-            >
-              {importLoading ? 'Aktarılıyor...' : '📁 Excel / CSV Dosyası Seç'}
-            </label>
-
-            <button
-              type="button"
-              onClick={downloadSampleExcel}
-              className="w-full text-center py-1.5 px-2 text-[11px] font-bold text-emerald-800 hover:text-emerald-950 hover:underline flex items-center justify-center gap-1 cursor-pointer transition"
-            >
-              <span>📥</span>
-              <span>Örnek Excel (.xlsx) Şablonunu İndir</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Sağ: Yeni Öğrenci Ekleme Formu */}
-        <form
-          onSubmit={handleAddStudent}
-          className="lg:col-span-2 bg-white/80 backdrop-blur-md p-6 rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4"
-        >
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600 text-sm">🎓</span>
-              <h3 className="text-sm font-bold text-slate-900">Tekil Öğrenci Kaydı</h3>
-            </div>
-            <p className="text-xs text-slate-400">Öğrenciyi cinsiyet ve fotoğraf bilgisiyle birlikte kaydedin.</p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+      {/* Bento Grid: Excel İçe Aktarma & Tekil Öğrenci Kaydı (Yalnızca can_manage_students izni varsa) */}
+      {canManageStudents && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Sol: Excel / CSV Yükleme & Örnek Şablon */}
+          <div className="relative overflow-hidden bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-white p-6 rounded-3xl border border-emerald-200/80 shadow-2xs flex flex-col justify-between space-y-4">
             <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">Okul No *</label>
-              <input
-                type="text"
-                placeholder="Örn: 142"
-                value={studentNumber}
-                onChange={(e) => setStudentNumber(e.target.value)}
-                className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-indigo-500 bg-slate-50/70"
-                required
-              />
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-emerald-100/80 text-emerald-700 text-sm">📊</span>
+                <h3 className="text-sm font-bold text-emerald-950">Toplu Excel / CSV Yükle</h3>
+              </div>
+              <p className="text-xs text-emerald-800/80 mt-2 leading-relaxed">
+                e-Okuldan aldığınız listeyi seçerek yüzlerce öğrenciyi tek seferde aktarın.
+              </p>
             </div>
-            <div className="sm:col-span-2">
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">Ad Soyad *</label>
-              <input
-                type="text"
-                placeholder="Öğrenci Adı Soyadı"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-indigo-500 bg-slate-50/70"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">Sınıf / Şube</label>
-              <input
-                type="text"
-                placeholder="Örn: 6A"
-                value={gradeClass}
-                onChange={(e) => setGradeClass(e.target.value)}
-                className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-indigo-500 bg-slate-50/70"
-              />
-            </div>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">Cinsiyet</label>
-              <select
-                value={gender}
-                onChange={(e) => setGender(e.target.value)}
-                className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-800 outline-none bg-slate-50/70 font-semibold"
+            <div className="space-y-2.5 pt-2">
+              <input
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                className="hidden"
+                id="excel-upload"
+              />
+              <label
+                htmlFor="excel-upload"
+                className={`w-full block text-center py-2.5 px-4 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition cursor-pointer shadow-md shadow-emerald-600/20 ${
+                  importLoading ? 'opacity-50 pointer-events-none' : ''
+                }`}
               >
-                <option value="kiz">👧 Kız Öğrenci</option>
-                <option value="erkek">👦 Erkek Öğrenci</option>
-                <option value="belirtilmedi">⚪ Belirtilmedi</option>
-              </select>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">Fotoğraf URL (İsteğe Bağlı)</label>
-              <input
-                type="text"
-                placeholder="https://... (Fotoğraf linki)"
-                value={photoUrl}
-                onChange={(e) => setPhotoUrl(e.target.value)}
-                className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-indigo-500 bg-slate-50/70 font-mono"
-              />
+                {importLoading ? 'Aktarılıyor...' : '📁 Excel / CSV Dosası Seç'}
+              </label>
+
+              <button
+                type="button"
+                onClick={downloadSampleExcel}
+                className="w-full text-center py-1.5 px-2 text-[11px] font-bold text-emerald-800 hover:text-emerald-950 hover:underline flex items-center justify-center gap-1 cursor-pointer transition"
+              >
+                <span>📥</span>
+                <span>Örnek Excel (.xlsx) Şablonunu İndir</span>
+              </button>
             </div>
           </div>
 
-          <div className="flex justify-end pt-3 border-t border-slate-100">
-            <button
-              type="submit"
-              disabled={loading}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl text-xs transition cursor-pointer shadow-md shadow-indigo-500/20"
-            >
-              {loading ? 'Ekleniyor...' : '+ Öğrenciyi Kaydet'}
-            </button>
-          </div>
-        </form>
-      </div>
+          {/* Sağ: Yeni Öğrenci Ekleme Formu */}
+          <form
+            onSubmit={handleAddStudent}
+            className="lg:col-span-2 bg-white/80 backdrop-blur-md p-6 rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col justify-between space-y-4"
+          >
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600 text-sm">🎓</span>
+                <h3 className="text-sm font-bold text-slate-900">Tekil Öğrenci Kaydı</h3>
+              </div>
+              <p className="text-xs text-slate-400">Öğrenciyi cinsiyet ve fotoğraf bilgisiyle birlikte kaydedin.</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">Okul No *</label>
+                <input
+                  type="text"
+                  placeholder="Örn: 142"
+                  value={studentNumber}
+                  onChange={(e) => setStudentNumber(e.target.value)}
+                  className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-indigo-500 bg-slate-50/70"
+                  required
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">Ad Soyad *</label>
+                <input
+                  type="text"
+                  placeholder="Öğrenci Adı Soyadı"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-indigo-500 bg-slate-50/70"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">Sınıf / Şube</label>
+                <input
+                  type="text"
+                  placeholder="Örn: 6A"
+                  value={gradeClass}
+                  onChange={(e) => setGradeClass(e.target.value)}
+                  className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-indigo-500 bg-slate-50/70"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">Cinsiyet</label>
+                <select
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value)}
+                  className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-800 outline-none bg-slate-50/70 font-semibold"
+                >
+                  <option value="kiz">👧 Kız Öğrenci</option>
+                  <option value="erkek">👦 Erkek Öğrenci</option>
+                  <option value="belirtilmedi">⚪ Belirtilmedi</option>
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">Fotoğraf URL (İsteğe Bağlı)</label>
+                <input
+                  type="text"
+                  placeholder="https://... (Fotoğraf linki)"
+                  value={photoUrl}
+                  onChange={(e) => setPhotoUrl(e.target.value)}
+                  className="w-full p-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 outline-none focus:border-indigo-500 bg-slate-50/70 font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-slate-100">
+              <button
+                type="submit"
+                disabled={loading}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl text-xs transition cursor-pointer shadow-md shadow-indigo-500/20"
+              >
+                {loading ? 'Ekleniyor...' : '+ Öğrenciyi Kaydet'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Kayıtlı Öğrenciler Listesi */}
       <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/90 shadow-2xs overflow-hidden space-y-4">
-        
-        {/* Üst Bar: Sınıf Filtreleme & Arama */}
         <div className="p-4 sm:p-5 border-b border-slate-100 space-y-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
             <div className="flex items-center gap-2">
@@ -426,7 +467,6 @@ export default function StudentsPage() {
             </div>
           </div>
 
-          {/* Sınıf Şubelerine Göre Hızlı Filtre Butonları */}
           <div className="flex flex-wrap items-center gap-1.5 pt-1">
             <span className="text-[11px] font-bold text-slate-500 mr-1">Şube Filtrele:</span>
             <button
@@ -451,7 +491,6 @@ export default function StudentsPage() {
           </div>
         </div>
 
-        {/* Liste */}
         <div className="divide-y divide-slate-100 max-h-[550px] overflow-y-auto px-4 sm:px-5 pb-4">
           {filteredStudents.length === 0 ? (
             <p className="p-12 text-center text-xs text-slate-400">Kayıt bulunamadı.</p>
@@ -500,25 +539,31 @@ export default function StudentsPage() {
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    onClick={() => startEdit(st)}
-                    className="text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1.5 rounded-lg transition cursor-pointer"
-                  >
-                    ✏️ Düzenle
-                  </button>
+                  {canManageStudents && (
+                    <button
+                      onClick={() => startEdit(st)}
+                      className="text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1.5 rounded-lg transition cursor-pointer"
+                    >
+                      ✏️ Düzenle
+                    </button>
+                  )}
                   <Link
                     href={`/ogrenciler/${st.id}`}
                     className="text-xs font-semibold text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg transition"
                   >
                     Karnesi →
                   </Link>
-                  <span className="text-slate-200">|</span>
-                  <button
-                    onClick={() => handleDeleteStudent(st.id, st.full_name)}
-                    className="text-xs font-semibold text-slate-400 hover:text-rose-600 hover:bg-rose-50 px-2 py-1.5 rounded-lg transition cursor-pointer"
-                  >
-                    Sil
-                  </button>
+                  {canManageStudents && (
+                    <>
+                      <span className="text-slate-200">|</span>
+                      <button
+                        onClick={() => handleDeleteStudent(st.id, st.full_name)}
+                        className="text-xs font-semibold text-slate-400 hover:text-rose-600 hover:bg-rose-50 px-2 py-1.5 rounded-lg transition cursor-pointer"
+                      >
+                        Sil
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             ))
@@ -527,7 +572,7 @@ export default function StudentsPage() {
       </div>
 
       {/* DÜZENLEME MODAL PENCERESİ */}
-      {editingStudent && (
+      {editingStudent && canManageStudents && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">

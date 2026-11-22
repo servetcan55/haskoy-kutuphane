@@ -4,8 +4,10 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { getAcademicInfo, matchesPeriod } from '@/lib/academic';
+import { useRouteGuard } from '@/lib/useRouteGuard';
 
 function ClassReportContent() {
+  const { user, loading: guardLoading, authorized } = useRouteGuard();
   const searchParams = useSearchParams();
   const urlGrade = searchParams.get('grade');
   const currentAcademic = getAcademicInfo();
@@ -24,6 +26,8 @@ function ClassReportContent() {
   });
 
   useEffect(() => {
+    if (guardLoading || !user || !authorized) return;
+
     const fetchClassData = async () => {
       setLoading(true);
 
@@ -31,7 +35,7 @@ function ClassReportContent() {
         supabase.from('students').select('*').order('student_number', { ascending: true }),
         supabase.from('loans').select('id, book_id, student_id, status, loan_date, return_date'),
         supabase.from('books').select('id, title, author, page_count, category'),
-        supabase.from('student_badges').select('*'), 
+        supabase.from('student_badges').select('*'),
         supabase.from('settings').select('value').eq('id', 'school_director').maybeSingle(),
         supabase.from('settings').select('value').eq('id', 'library_teacher').maybeSingle(),
       ]);
@@ -87,7 +91,7 @@ function ClassReportContent() {
           const b = allBooks.find((bk) => String(bk.id) === String(l.book_id));
           const p = Number(b?.page_count) || 0;
           const cat = String(b?.category || '').toLowerCase();
-          
+
           studentPages += p;
           if (cat.includes('bilim kurgu') || cat.includes('fantastik') || cat.includes('sci-fi')) {
             sciFiCount += 1;
@@ -104,7 +108,7 @@ function ClassReportContent() {
         classTotalBooks += studentLoans.length;
         classTotalPages += studentPages;
 
-        const studentBadges = allBadges.filter(b => String(b.student_id) === String(st.id));
+        const studentBadges = allBadges.filter((b) => String(b.student_id) === String(st.id));
 
         return {
           ...st,
@@ -112,7 +116,7 @@ function ClassReportContent() {
           totalPages: studentPages,
           sciFiCount: sciFiCount,
           books: readBooksList,
-          badges: studentBadges, 
+          badges: studentBadges,
         };
       });
 
@@ -129,7 +133,30 @@ function ClassReportContent() {
     };
 
     fetchClassData();
-  }, [urlGrade]);
+  }, [urlGrade, guardLoading, user, authorized]);
+
+  if (guardLoading) {
+    return <div className="p-8 text-center text-xs font-mono text-slate-400">Yetki kontrol ediliyor...</div>;
+  }
+
+  if (!user || !authorized) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center">
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
+          <span className="text-3xl">🔒</span>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
+          <p className="text-xs text-slate-500">
+            Bulunduğunuz kullanıcı grubu Şube Karnesi ekranını görüntülemek için yetkilendirilmemiş.
+          </p>
+          <div className="pt-2">
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+              ← Ana Sayfaya Dön
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handlePrint = () => {
     window.print();
@@ -137,14 +164,13 @@ function ClassReportContent() {
 
   return (
     <>
-      {/* KESİN ÇÖZÜMLÜ YAZDIRMA CSS BLOĞU */}
       <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 0; 
+            margin: 0;
           }
-          
+
           html, body {
             background-color: white !important;
             margin: 0 !important;
@@ -182,7 +208,6 @@ function ClassReportContent() {
       `}</style>
 
       <div className="bg-slate-100 min-h-screen text-slate-900 font-sans print-full-width-container">
-        
         {/* 1. ÜST ARAÇ ÇUBUĞU (Yazdırmada / PDF'te Gizlenir) */}
         <div className="print:hidden p-4 bg-white border-b border-slate-200 shadow-xs sticky top-0 z-50">
           <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -228,11 +253,9 @@ function ClassReportContent() {
           </div>
         ) : (
           <div className="max-w-4xl mx-auto py-8 px-4 print:p-0 print:max-w-none space-y-8 print:space-y-0">
-            
             {/* 1. BÖLÜM: SINIFIN GENEL KARNESİ & OKUMA ÇİZELGESİ */}
             <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm print:shadow-none print:border-none print:rounded-none print:p-10 print:min-h-[297mm] flex flex-col justify-between box-border">
               <div>
-                {/* Başlık Anteti ve Okul Logosu */}
                 <div className="flex items-center justify-between border-b-2 border-slate-900 pb-4">
                   <img src="/okul-logo.png" alt="Hasköy Ortaokulu Logo" className="w-14 h-14 object-contain" />
                   <div className="text-center flex-1 mx-4">
@@ -331,7 +354,6 @@ function ClassReportContent() {
                 className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm print:shadow-none print:border-none print:rounded-none print:p-10 print:h-[297mm] flex flex-col justify-between box-border print:break-before-page"
               >
                 <div>
-                  {/* Öğrenci Karne Anteti ve Okul Logosu */}
                   <div className="flex items-center justify-between border-b-2 border-slate-900 pb-3">
                     <img src="/okul-logo.png" alt="Hasköy Ortaokulu Logo" className="w-12 h-12 object-contain" />
                     <div className="text-center flex-1 mx-3">
@@ -378,7 +400,7 @@ function ClassReportContent() {
                     <p className="font-bold uppercase tracking-wider text-[11px]">Kazanılan Rozetler ve Başarılar:</p>
                     {student.badges && student.badges.length > 0 ? (
                       <div className="flex flex-wrap gap-2">
-                        {student.badges.map(b => (
+                        {student.badges.map((b) => (
                           <span key={b.id} className="font-semibold px-2 py-0.5 bg-white border border-slate-300 rounded text-[10px]">
                             {b.badge_icon} {b.badge_title}
                           </span>
@@ -453,7 +475,6 @@ function ClassReportContent() {
                 </div>
               </div>
             ))}
-
           </div>
         )}
       </div>

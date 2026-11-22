@@ -3,11 +3,14 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabase';
+import { useRouteGuard } from '../../lib/useRouteGuard';
 
 export default function AddBookPage() {
   const router = useRouter();
+  const { user, loading: guardLoading, authorized, permissions } = useRouteGuard();
+  const canAddBook = Boolean(permissions?.can_add_book);
 
-  const [demirbasNo, setDemirbasNo] = useState(''); // Demirbaş No State'i
+  const [demirbasNo, setDemirbasNo] = useState('');
   const [isbn, setIsbn] = useState('');
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
@@ -42,7 +45,7 @@ export default function AddBookPage() {
         setTitle(bookData.title || '');
         setAuthor(bookData.authors?.map((a) => a.name).join(', ') || '');
         setPublisher(bookData.publishers?.map((p) => p.name).join(', ') || '');
-        
+
         if (bookData.number_of_pages) {
           setPageCount(bookData.number_of_pages);
         }
@@ -69,6 +72,10 @@ export default function AddBookPage() {
   // Yeni Kitabı Supabase'e Kaydetme
   const handleSaveBook = async (e) => {
     e.preventDefault();
+    if (!canAddBook) {
+      setMessage({ text: 'Yeni kitap ekleme yetkiniz bulunmuyor.', type: 'error' });
+      return;
+    }
     if (!title.trim()) {
       setMessage({ text: 'Lütfen en azından kitap adını giriniz.', type: 'error' });
       return;
@@ -102,6 +109,29 @@ export default function AddBookPage() {
       }, 900);
     }
   };
+
+  if (guardLoading) {
+    return <div className="p-8 text-center text-xs text-slate-400">Yetki kontrol ediliyor...</div>;
+  }
+
+  if (!user || !authorized || !canAddBook) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center">
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
+          <span className="text-3xl">🔒</span>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
+          <p className="text-xs text-slate-500">
+            Yeni kitap eklemek için grubunuzda <strong>Yeni Kitap Ekleyebilir</strong> yetkisi veya <strong>/kitaplar</strong> sayfasına erişim izni bulunmalıdır.
+          </p>
+          <div className="pt-2">
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+              ← Ana Sayfaya Dön
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-5xl mx-auto antialiased">
@@ -202,7 +232,6 @@ export default function AddBookPage() {
 
           {/* Sağ: Kitap Künye Alanları */}
           <div className="flex-1 w-full space-y-4">
-            {/* Demirbaş Numarası ve Kitap Adı */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">🏷️ Demirbaş No</label>
@@ -252,7 +281,6 @@ export default function AddBookPage() {
               </div>
             </div>
 
-            {/* Raf Konumu - Kitap Türü */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">Raf Konumu</label>
@@ -286,7 +314,6 @@ export default function AddBookPage() {
               </div>
             </div>
 
-            {/* Sayfa Sayısı - Stok */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">📄 Sayfa Sayısı</label>
@@ -325,7 +352,6 @@ export default function AddBookPage() {
           </div>
         </div>
 
-        {/* Kaydetme Butonu */}
         <div className="pt-4 border-t border-slate-100 flex justify-end">
           <button
             type="submit"

@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { getAcademicInfo, matchesPeriod } from '@/lib/academic';
+import { useStaffAuth } from '@/lib/useStaffAuth';
 
 const DEFAULT_QUOTES = [
   { text: 'Kitapsız yaşamak; kör, sağır ve dilsiz yaşamaktır.', author: 'Seneca' },
@@ -85,6 +86,9 @@ const getWeatherDetails = (code) => {
 };
 
 export default function LibraryKioskPage() {
+  const { user } = useStaffAuth();
+  const [exitHref, setExitHref] = useState('/dashboard');
+
   const [currentTime, setCurrentTime] = useState('');
   const [currentDate, setCurrentDate] = useState('');
   const [currentMonthName, setCurrentMonthName] = useState('');
@@ -146,6 +150,30 @@ export default function LibraryKioskPage() {
       setQrOrigin(window.location.origin);
     }
   }, []);
+
+  // Oturumdaki personelin yetkili çıkış rotasını belirle
+  useEffect(() => {
+    let active = true;
+    const resolveExitRoute = async () => {
+      if (!user || user.role === 'admin') {
+        if (active) setExitHref('/dashboard');
+        return;
+      }
+      const slug = user.role === 'librarian' ? 'teacher_librarian' : user.role;
+      const { data } = await supabase
+        .from('user_groups')
+        .select('allowed_routes')
+        .eq('slug', slug)
+        .maybeSingle();
+      if (!active) return;
+      const routes = Array.isArray(data?.allowed_routes) ? data.allowed_routes : [];
+      setExitHref(routes.includes('/dashboard') ? '/dashboard' : routes[0] || '/odunc-ver');
+    };
+    resolveExitRoute();
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   // Saat & Teneffüs Güncelleme
   useEffect(() => {
@@ -1065,10 +1093,10 @@ export default function LibraryKioskPage() {
         </div>
 
         <Link
-          href="/dashboard"
+          href={exitHref}
           className="text-xs font-semibold text-slate-500 hover:text-slate-300 transition px-3 py-1 rounded-xl hover:bg-slate-900 border border-transparent hover:border-slate-800"
         >
-          ✕ Panodan Çık (Ana Sayfa)
+          ✕ Panodan Çık
         </Link>
       </footer>
     </div>

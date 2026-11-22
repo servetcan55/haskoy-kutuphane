@@ -9,6 +9,9 @@ export default function DashboardPage() {
   const { user, logout, loading: authLoading } = useStaffAuth();
   const [savedStudent, setSavedStudent] = useState(null);
 
+  const [allowedRoutes, setAllowedRoutes] = useState(null); // null => henüz yüklenmedi veya admin
+  const [groupBadge, setGroupBadge] = useState('');
+
   const [period, setPeriod] = useState('term'); // 'term', 'month', 'all'
   const [leaderTab, setLeaderTab] = useState('month'); // 'month' (Bu Ay) | 'term' (Bu Dönem)
   const [leaderMetric, setLeaderMetric] = useState('books'); // 'books' (Kitap) | 'pages' (Sayfa)
@@ -50,6 +53,67 @@ export default function DashboardPage() {
       } catch (e) {}
     }
   }, []);
+
+  // Kullanıcının grubuna göre yetkili rotaları ve rozet adını yükle
+  useEffect(() => {
+    let active = true;
+
+    const loadGroupInfo = async () => {
+      if (!user) {
+        if (active) {
+          setAllowedRoutes(null);
+          setGroupBadge('');
+        }
+        return;
+      }
+
+      if (user.role === 'admin') {
+        if (active) {
+          setAllowedRoutes(null);
+          setGroupBadge('MÜDÜR');
+        }
+        return;
+      }
+
+      const slug = user.role === 'librarian' ? 'teacher_librarian' : user.role;
+      const { data } = await supabase
+        .from('user_groups')
+        .select('name, allowed_routes')
+        .eq('slug', slug)
+        .maybeSingle();
+
+      if (!active) return;
+
+      const defaultLabel =
+        slug === 'student_librarian'
+          ? 'KÜTÜPHANE ÖĞRENCİ'
+          : slug === 'teacher_librarian'
+          ? 'KÜTÜPHANE ÖĞRETMEN'
+          : slug.toUpperCase();
+
+      setGroupBadge((data?.name || defaultLabel).toUpperCase());
+      setAllowedRoutes(Array.isArray(data?.allowed_routes) ? data.allowed_routes : []);
+    };
+
+    loadGroupInfo();
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  const canRoute = (route) => {
+    if (!user || user.role === 'admin' || allowedRoutes === null) return true;
+    return allowedRoutes.includes(route);
+  };
+
+  const showQuickActions =
+    user &&
+    user.role !== 'student_librarian' &&
+    (canRoute('/odunc-ver') ||
+      canRoute('/kitaplar') ||
+      canRoute('/ogrenciler') ||
+      canRoute('/etiketler') ||
+      canRoute('/nobet'));
 
   const loadDashboardData = async () => {
     if (!user) return;
@@ -219,7 +283,7 @@ export default function DashboardPage() {
         monthTopClassesBooks: monthRanks.topClassesBooks,
         monthTopClassesPages: monthRanks.topClassesPages,
         termTopStudentsBooks: termRanks.topStudentsBooks,
-        termTopStudentsPages: termRanks.topStudentsPages,
+        termTopStudentsPages: termRanks.termTopStudentsPages,
         termTopClassesBooks: termRanks.topClassesBooks,
         termTopClassesPages: termRanks.topClassesPages,
       });
@@ -398,7 +462,7 @@ export default function DashboardPage() {
                         : 'bg-blue-100 text-blue-800 border border-blue-300'
                     }`}
                   >
-                    {user.role === 'admin' ? 'Müdür' : 'Kütüphaneci'}
+                    {groupBadge || (user.role === 'admin' ? 'Müdür' : 'Kütüphaneci')}
                   </span>
                 </div>
               </div>
@@ -498,73 +562,85 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 2. KISIM: HIZLI İŞLEMLER MENÜSÜ (NÖBET LİSTESİ DAHİL) */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-          <Link
-            href="/odunc-ver"
-            className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
-          >
-            <div className="w-11 h-11 rounded-2xl bg-blue-50 group-hover:bg-blue-600 text-blue-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
-              🔄
-            </div>
-            <div>
-              <h4 className="text-xs font-black text-slate-900 group-hover:text-blue-600 transition">Ödünç Masası</h4>
-              <p className="text-[11px] text-slate-400">Kitap Ver / İade Al</p>
-            </div>
-          </Link>
+        {/* 2. KISIM: HIZLI İŞLEMLER MENÜSÜ */}
+        {showQuickActions && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            {canRoute('/odunc-ver') && (
+              <Link
+                href="/odunc-ver"
+                className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
+              >
+                <div className="w-11 h-11 rounded-2xl bg-blue-50 group-hover:bg-blue-600 text-blue-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
+                  🔄
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-900 group-hover:text-blue-600 transition">Ödünç Masası</h4>
+                  <p className="text-[11px] text-slate-400">Kitap Ver / İade Al</p>
+                </div>
+              </Link>
+            )}
 
-          <Link
-            href="/kitaplar"
-            className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
-          >
-            <div className="w-11 h-11 rounded-2xl bg-emerald-50 group-hover:bg-emerald-600 text-emerald-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
-              ➕
-            </div>
-            <div>
-              <h4 className="text-xs font-black text-slate-900 group-hover:text-emerald-600 transition">Kitaplar</h4>
-              <p className="text-[11px] text-slate-400">Envanter & Yeni Ekle</p>
-            </div>
-          </Link>
+            {canRoute('/kitaplar') && (
+              <Link
+                href="/kitaplar"
+                className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
+              >
+                <div className="w-11 h-11 rounded-2xl bg-emerald-50 group-hover:bg-emerald-600 text-emerald-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
+                  ➕
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-900 group-hover:text-emerald-600 transition">Kitaplar</h4>
+                  <p className="text-[11px] text-slate-400">Envanter & Yeni Ekle</p>
+                </div>
+              </Link>
+            )}
 
-          <Link
-            href="/ogrenciler"
-            className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
-          >
-            <div className="w-11 h-11 rounded-2xl bg-purple-50 group-hover:bg-purple-600 text-purple-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
-              🎓
-            </div>
-            <div>
-              <h4 className="text-xs font-black text-slate-900 group-hover:text-purple-600 transition">Öğrenciler</h4>
-              <p className="text-[11px] text-slate-400">Okurlar & Karneler</p>
-            </div>
-          </Link>
+            {canRoute('/ogrenciler') && (
+              <Link
+                href="/ogrenciler"
+                className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
+              >
+                <div className="w-11 h-11 rounded-2xl bg-purple-50 group-hover:bg-purple-600 text-purple-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
+                  🎓
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-900 group-hover:text-purple-600 transition">Öğrenciler</h4>
+                  <p className="text-[11px] text-slate-400">Okurlar & Karneler</p>
+                </div>
+              </Link>
+            )}
 
-          <Link
-            href="/etiketler"
-            className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
-          >
-            <div className="w-11 h-11 rounded-2xl bg-amber-50 group-hover:bg-amber-600 text-amber-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
-              🏷️
-            </div>
-            <div>
-              <h4 className="text-xs font-black text-slate-900 group-hover:text-amber-600 transition">Barkod Bas</h4>
-              <p className="text-[11px] text-slate-400">Kitap & Sırt Etiketi</p>
-            </div>
-          </Link>
+            {canRoute('/etiketler') && (
+              <Link
+                href="/etiketler"
+                className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
+              >
+                <div className="w-11 h-11 rounded-2xl bg-amber-50 group-hover:bg-amber-600 text-amber-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
+                  🏷️
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-900 group-hover:text-amber-600 transition">Barkod Bas</h4>
+                  <p className="text-[11px] text-slate-400">Kitap & Sırt Etiketi</p>
+                </div>
+              </Link>
+            )}
 
-          <Link
-            href="/nobet"
-            className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
-          >
-            <div className="w-11 h-11 rounded-2xl bg-indigo-50 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
-              🛡️
-            </div>
-            <div>
-              <h4 className="text-xs font-black text-slate-900 group-hover:text-indigo-600 transition">Nöbet Listesi</h4>
-              <p className="text-[11px] text-slate-400">Excel Yükle & Pano</p>
-            </div>
-          </Link>
-        </div>
+            {canRoute('/nobet') && (
+              <Link
+                href="/nobet"
+                className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
+              >
+                <div className="w-11 h-11 rounded-2xl bg-indigo-50 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
+                  🛡️
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-900 group-hover:text-indigo-600 transition">Nöbet Listesi</h4>
+                  <p className="text-[11px] text-slate-400">Excel Yükle & Pano</p>
+                </div>
+              </Link>
+            )}
+          </div>
+        )}
 
         {/* 3. KISIM: İadesi Yaklaşan & Geciken Kitaplar */}
         <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">

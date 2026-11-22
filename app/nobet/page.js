@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
-import { useStaffAuth } from '@/lib/useStaffAuth';
+import { useRouteGuard } from '@/lib/useRouteGuard';
 
 const AYLAR = {
   ocak: 1,
@@ -99,7 +99,12 @@ function parseExcelDateToISO(rawDate) {
 }
 
 function formatDisplayDate(rawDate, isoDate) {
-  if (typeof rawDate === 'string' && rawDate.trim() && !/^\d{5}/.test(rawDate.trim()) && !/^\d{4}-\d{2}-\d{2}$/.test(rawDate.trim())) {
+  if (
+    typeof rawDate === 'string' &&
+    rawDate.trim() &&
+    !/^\d{5}/.test(rawDate.trim()) &&
+    !/^\d{4}-\d{2}-\d{2}$/.test(rawDate.trim())
+  ) {
     return rawDate.trim();
   }
   if (!isoDate) return '';
@@ -112,7 +117,7 @@ function formatDisplayDate(rawDate, isoDate) {
 }
 
 export default function NobetYonetimPage() {
-  const { user, loading: authChecking } = useStaffAuth();
+  const { user, loading: authChecking, authorized, permissions } = useRouteGuard();
   const [duties, setDuties] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -136,12 +141,12 @@ export default function NobetYonetimPage() {
   };
 
   useEffect(() => {
-    if (user) {
+    if (!authChecking && user && authorized) {
       loadDuties();
     } else if (!authChecking) {
       setLoading(false);
     }
-  }, [user, authChecking]);
+  }, [user, authChecking, authorized]);
 
   const handleDownloadSampleExcel = () => {
     const sampleRows = [
@@ -171,6 +176,11 @@ export default function NobetYonetimPage() {
   };
 
   const handleExcelUpload = async (e) => {
+    if (!permissions.can_manage_duties) {
+      setMessage({ text: 'Nöbet Excel yükleme yetkiniz bulunmuyor.', type: 'error' });
+      return;
+    }
+
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -290,18 +300,18 @@ export default function NobetYonetimPage() {
     return <div className="p-8 text-center text-xs text-slate-400">Yetki kontrol ediliyor...</div>;
   }
 
-  if (!user) {
+  if (!user || !authorized) {
     return (
       <div className="max-w-lg mx-auto p-8 text-center">
         <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
           <span className="text-3xl">🔒</span>
-          <h1 className="text-lg font-black text-slate-900">Yönetici / Personel Alanı</h1>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
           <p className="text-xs text-slate-500">
-            Kütüphane nöbet çizelgesi yalnızca yetkili personel tarafından yönetilebilir.
+            Bulunduğunuz kullanıcı grubu Nöbet Çizelgesi sayfasını görüntülemek için yetkilendirilmemiş.
           </p>
           <div className="pt-2 flex justify-center gap-3">
             <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
-              Yönetim Girişi
+              ← Ana Sayfaya Dön
             </Link>
             <Link href="/pano" className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold">
               Pano TV
@@ -332,57 +342,63 @@ export default function NobetYonetimPage() {
       </div>
 
       {message.text && (
-        <div className={`p-4 rounded-2xl text-xs font-bold border ${
-          message.type === 'error' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-        }`}>
+        <div
+          className={`p-4 rounded-2xl text-xs font-bold border ${
+            message.type === 'error'
+              ? 'bg-rose-50 text-rose-700 border-rose-200'
+              : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+          }`}
+        >
           {message.text}
         </div>
       )}
 
-      <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-2xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-        <div className="space-y-1.5">
-          <h2 className="text-sm font-black text-slate-900">Excel ile Nöbet Listesi Yükle / Güncelle</h2>
-          <p className="text-xs text-slate-500">
-            Hazırladığınız <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono">.xlsx</code> dosyasını yüklediğinizde tüm tarihler otomatik eşleştirilir.
-          </p>
-          <label className="inline-flex items-center gap-2 text-xs text-slate-700 font-medium pt-1 cursor-pointer">
+      {permissions.can_manage_duties && (
+        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-2xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+          <div className="space-y-1.5">
+            <h2 className="text-sm font-black text-slate-900">Excel ile Nöbet Listesi Yükle / Güncelle</h2>
+            <p className="text-xs text-slate-500">
+              Hazırladığınız <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono">.xlsx</code> dosyasını yüklediğinizde tüm tarihler otomatik eşleştirilir.
+            </p>
+            <label className="inline-flex items-center gap-2 text-xs text-slate-700 font-medium pt-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={replaceExisting}
+                onChange={(e) => setReplaceExisting(e.target.checked)}
+                className="rounded border-slate-300 text-blue-600"
+              />
+              <span>Yüklemeden önce mevcut eski nöbet listesini temizle (Önerilen)</span>
+            </label>
+          </div>
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={handleDownloadSampleExcel}
+              className="text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-3 rounded-2xl transition cursor-pointer flex items-center gap-1.5"
+            >
+              📥 <span>Örnek Excel İndir</span>
+            </button>
+
             <input
-              type="checkbox"
-              checked={replaceExisting}
-              onChange={(e) => setReplaceExisting(e.target.checked)}
-              className="rounded border-slate-300 text-blue-600"
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleExcelUpload}
+              className="hidden"
             />
-            <span>Yüklemeden önce mevcut eski nöbet listesini temizle (Önerilen)</span>
-          </label>
+
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+              className="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3 rounded-2xl transition shadow-md shadow-emerald-500/20 cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+            >
+              📤 <span>{uploading ? 'Excel Yükleniyor...' : 'Excel Verisi Yükle'}</span>
+            </button>
+          </div>
         </div>
-
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            type="button"
-            onClick={handleDownloadSampleExcel}
-            className="text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-3 rounded-2xl transition cursor-pointer flex items-center gap-1.5"
-          >
-            📥 <span>Örnek Excel İndir</span>
-          </button>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={handleExcelUpload}
-            className="hidden"
-          />
-
-          <button
-            type="button"
-            disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
-            className="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3 rounded-2xl transition shadow-md shadow-emerald-500/20 cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-          >
-            📤 <span>{uploading ? 'Excel Yükleniyor...' : 'Excel Verisi Yükle'}</span>
-          </button>
-        </div>
-      </div>
+      )}
 
       <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-2xs">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -411,7 +427,7 @@ export default function NobetYonetimPage() {
               ) : duties.length === 0 ? (
                 <tr>
                   <td colSpan="7" className="p-10 text-center text-slate-400">
-                    Henüz nöbet listesi yüklenmemiş. Yukarıdaki <strong>"Excel Verisi Yükle"</strong> butonuyla dosyanızı yükleyebilirsiniz.
+                    Henüz nöbet listesi yüklenmemiş. Yetkiniz varsa yukarıdaki <strong>"Excel Verisi Yükle"</strong> butonuyla dosyanızı yükleyebilirsiniz.
                   </td>
                 </tr>
               ) : (

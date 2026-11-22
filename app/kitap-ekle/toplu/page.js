@@ -3,9 +3,14 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
+import { useRouteGuard } from '@/lib/useRouteGuard';
 
 export default function TopluKitapYuklePage() {
   const router = useRouter();
+  const { user, loading: guardLoading, authorized, permissions } = useRouteGuard();
+  const canAddBook = Boolean(permissions?.can_add_book);
+  const canDeleteBook = Boolean(permissions?.can_delete_book);
+
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState([]);
   const [message, setMessage] = useState({ text: '', type: '' });
@@ -18,7 +23,6 @@ export default function TopluKitapYuklePage() {
       .split(' ')
       .map((word) => {
         if (!word) return '';
-        // Bağlaçlar veya küçük kalması istenen kelimeler hariç ilk harfi büyük yap
         return word.charAt(0).toLocaleUpperCase('tr-TR') + word.slice(1);
       })
       .join(' ');
@@ -26,6 +30,11 @@ export default function TopluKitapYuklePage() {
 
   // CSV dosyasını okuma ve önizleme
   const handleFileUpload = (e) => {
+    if (!canAddBook) {
+      setMessage({ text: 'Toplu kitap yükleme yetkiniz bulunmuyor.', type: 'error' });
+      return;
+    }
+
     const file = e.target.files[0];
     if (!file) return;
 
@@ -42,24 +51,23 @@ export default function TopluKitapYuklePage() {
     const lines = text.split(/\r\n|\n/);
     const books = [];
 
-    // Başlık satırını atlayıp 1. satırdan itibaren okuyoruz
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
 
       if (line.replace(/;/g, '').trim() === '') continue;
 
-      const cols = line.split(';'); 
-      
+      const cols = line.split(';');
+
       if (cols.length >= 2) {
         const rawTitle = cols[1]?.replace(/"/g, '').trim();
         if (!rawTitle) continue;
 
         books.push({
           isbn: cols[0]?.replace(/"/g, '').trim() || '',
-          title: toTitleCase(rawTitle), // Kitap adını düzgün formata çevir
-          author: toTitleCase(cols[2]?.replace(/"/g, '').trim() || ''), // Yazar adını düzgün formata çevir
-          publisher: toTitleCase(cols[3]?.replace(/"/g, '').trim() || ''), // Yayınevini düzgün formata çevir
+          title: toTitleCase(rawTitle),
+          author: toTitleCase(cols[2]?.replace(/"/g, '').trim() || ''),
+          publisher: toTitleCase(cols[3]?.replace(/"/g, '').trim() || ''),
           page_count: parseInt(cols[5]?.replace(/"/g, '').trim(), 10) || 0,
           category: toTitleCase(cols[6]?.replace(/"/g, '').trim() || 'Roman'),
           demirbas_no: cols[7]?.replace(/"/g, '').trim() || cols[0]?.replace(/"/g, '').trim() || '',
@@ -69,11 +77,19 @@ export default function TopluKitapYuklePage() {
     }
 
     setPreview(books);
-    setMessage({ text: `${books.length} adet kitap büyük/küçük harf düzenlemesi yapılarak önizlemeye hazır hale getirildi.`, type: 'success' });
+    setMessage({
+      text: `${books.length} adet kitap büyük/küçük harf düzenlemesi yapılarak önizlemeye hazır hale getirildi.`,
+      type: 'success',
+    });
   };
 
-  // Veritabanındaki TÜM ESKİ KİTAPLARI SİLME FONKSİYONU
+  // Veritabanındaki TÜM ESKİ KİTAPLARI SİLME FONKSİYONU (Yalnızca can_delete_book izniyle)
   const handleClearAllBooks = async () => {
+    if (!canDeleteBook) {
+      setMessage({ text: 'Envanteri sıfırlama / kitap silme yetkiniz bulunmuyor.', type: 'error' });
+      return;
+    }
+
     if (!window.confirm('DİKKAT: Veritabanındaki TÜM kitaplar kalıcı olarak silinecek! Emin misiniz?')) {
       return;
     }
@@ -87,14 +103,22 @@ export default function TopluKitapYuklePage() {
     if (error) {
       setMessage({ text: 'Silme hatası: ' + error.message, type: 'error' });
     } else {
-      setMessage({ text: 'Veritabanındaki tüm eski kitaplar başarıyla temizlendi! Şimdi düzeltilmiş listeyi yükleyebilirsiniz.', type: 'success' });
+      setMessage({
+        text: 'Veritabanındaki tüm eski kitaplar başarıyla temizlendi! Şimdi düzeltilmiş listeyi yükleyebilirsiniz.',
+        type: 'success',
+      });
     }
     setLoading(false);
   };
 
   // Veritabanına toplu kaydetme
   const handleUploadToDatabase = async () => {
+    if (!canAddBook) {
+      setMessage({ text: 'Kitap ekleme yetkiniz bulunmuyor.', type: 'error' });
+      return;
+    }
     if (preview.length === 0) return;
+
     setLoading(true);
     setMessage({ text: 'Düzeltilmiş kitaplar veritabanına yükleniyor, lütfen bekleyin...', type: 'success' });
 
@@ -103,13 +127,39 @@ export default function TopluKitapYuklePage() {
     if (error) {
       setMessage({ text: 'Yükleme hatası: ' + error.message, type: 'error' });
     } else {
-      setMessage({ text: `Tebrikler! ${preview.length} kitap başlık formatları düzenlenerek başarıyla eklendi.`, type: 'success' });
+      setMessage({
+        text: `Tebrikler! ${preview.length} kitap başlık formatları düzenlenerek başarıyla eklendi.`,
+        type: 'success',
+      });
       setTimeout(() => {
         router.push('/kitaplar');
       }, 2000);
     }
     setLoading(false);
   };
+
+  if (guardLoading) {
+    return <div className="p-8 text-center text-xs text-slate-400">Yetki kontrol ediliyor...</div>;
+  }
+
+  if (!user || !authorized || !canAddBook) {
+    return (
+      <div className="max-w-lg mx-auto p-8 text-center">
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 space-y-3 shadow-xs">
+          <span className="text-3xl">🔒</span>
+          <h1 className="text-lg font-black text-slate-900">Bu Sayfaya Erişim Yetkiniz Yok</h1>
+          <p className="text-xs text-slate-500">
+            Toplu kitap yükleme işlemi için grubunuzda <strong>Yeni Kitap Ekleyebilir</strong> yetkisi veya <strong>/kitaplar</strong> sayfasına erişim izni bulunmalıdır.
+          </p>
+          <div className="pt-2">
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">
+              ← Ana Sayfaya Dön
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-5xl mx-auto antialiased">
@@ -128,27 +178,35 @@ export default function TopluKitapYuklePage() {
       </div>
 
       {message.text && (
-        <div className={`p-4 rounded-2xl text-xs font-semibold border ${
-          message.type === 'error' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-        }`}>
+        <div
+          className={`p-4 rounded-2xl text-xs font-semibold border ${
+            message.type === 'error'
+              ? 'bg-rose-50 text-rose-700 border-rose-200'
+              : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+          }`}
+        >
           {message.text}
         </div>
       )}
 
-      {/* SIFIRLAMA (TEMİZLEME) KUTUSU */}
-      <div className="bg-rose-50/60 p-5 rounded-3xl border border-rose-200 flex items-center justify-between gap-4">
-        <div>
-          <h3 className="text-xs font-black text-rose-900">Mevcut Envanteri Temizle</h3>
-          <p className="text-[11px] text-rose-700 mt-0.5">Büyük harfli eski kayıtları silip düzenlenmiş versiyonu yüklemek için önce buraya basabilirsiniz.</p>
+      {/* SIFIRLAMA (TEMİZLEME) KUTUSU - Yalnızca kitap silme izni olan gruplara görünür */}
+      {canDeleteBook && (
+        <div className="bg-rose-50/60 p-5 rounded-3xl border border-rose-200 flex items-center justify-between gap-4">
+          <div>
+            <h3 className="text-xs font-black text-rose-900">Mevcut Envanteri Temizle</h3>
+            <p className="text-[11px] text-rose-700 mt-0.5">
+              Büyük harfli eski kayıtları silip düzenlenmiş versiyonu yüklemek için önce buraya basabilirsiniz.
+            </p>
+          </div>
+          <button
+            onClick={handleClearAllBooks}
+            disabled={loading}
+            className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-sm cursor-pointer whitespace-nowrap disabled:bg-rose-300"
+          >
+            Tüm Kitapları Sil / Sıfırla
+          </button>
         </div>
-        <button
-          onClick={handleClearAllBooks}
-          disabled={loading}
-          className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-sm cursor-pointer whitespace-nowrap disabled:bg-rose-300"
-        >
-          Tüm Kitapları Sil / Sıfırla
-        </button>
-      </div>
+      )}
 
       {/* Yükleme Alanı */}
       <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4">
