@@ -5,6 +5,8 @@ import * as XLSX from 'xlsx';
 import { supabase } from '../../lib/supabase';
 import { useRouteGuard } from '../../lib/useRouteGuard';
 
+const PIN_COLUMN = 'pin_code';
+
 export default function StudentsPage() {
   const { user, loading: guardLoading, authorized, permissions } = useRouteGuard();
   const canManageStudents = Boolean(permissions?.can_manage_students);
@@ -20,6 +22,7 @@ export default function StudentsPage() {
 
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resettingPin, setResettingPin] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
   const fileInputRef = useRef(null);
@@ -33,6 +36,7 @@ export default function StudentsPage() {
     grade_class: '',
     gender: 'belirtilmedi',
     photo_url: '',
+    has_pin: false,
   });
 
   const loadStudents = async () => {
@@ -113,6 +117,7 @@ export default function StudentsPage() {
       grade_class: st.grade_class || '',
       gender: st.gender || 'kiz',
       photo_url: st.photo_url || '',
+      has_pin: /^\d{4}$/.test(String(st[PIN_COLUMN] ?? '').trim()),
     });
   };
 
@@ -141,6 +146,37 @@ export default function StudentsPage() {
       loadStudents();
     }
     setLoading(false);
+  };
+
+  // Öğrenci Okur Portalı PIN Kodunu Sıfırla
+  const handleResetStudentPin = async () => {
+    if (!canManageStudents || !editingStudent) return;
+    if (
+      !confirm(
+        `"${editForm.full_name}" adlı öğrencinin mevcut PIN kodunu sıfırlamak istediğinize emin misiniz?\n\nÖğrenci bir sonraki girişinde kendi yeni 4 haneli PIN kodunu oluşturacaktır.`
+      )
+    ) {
+      return;
+    }
+
+    setResettingPin(true);
+    const { error } = await supabase
+      .from('students')
+      .update({ [PIN_COLUMN]: null })
+      .eq('id', editForm.id);
+
+    setResettingPin(false);
+
+    if (error) {
+      setMessage({ text: 'PIN sıfırlama hatası: ' + error.message, type: 'error' });
+    } else {
+      setEditForm((prev) => ({ ...prev, has_pin: false }));
+      setMessage({
+        text: `"${editForm.full_name}" adlı öğrencinin PIN kodu sıfırlandı. Bir sonraki girişte yeni PIN belirleyebilir.`,
+        type: 'success',
+      });
+      loadStudents();
+    }
   };
 
   // Öğrenci Silme (Yalnızca admin veya can_delete_student iznine sahip kullanıcılar)
@@ -642,6 +678,29 @@ export default function StudentsPage() {
                   placeholder="https://..."
                   className="w-full p-2.5 border border-slate-200 rounded-xl text-xs bg-slate-50 font-mono"
                 />
+              </div>
+
+              {/* Öğrenci Okur Portalı PIN Durumu & Sıfırlama */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/90 flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-[11px] font-bold text-slate-700 block">
+                    🔐 Öğrenci Portalı PIN Durumu
+                  </span>
+                  <span className="text-[11px] text-slate-500">
+                    {editForm.has_pin
+                      ? '•••• (4 haneli PIN tanımlı)'
+                      : 'Henüz PIN belirlenmedi (ilk girişte oluşturacak)'}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleResetStudentPin}
+                  disabled={resettingPin || !editForm.has_pin}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                >
+                  {resettingPin ? 'Sıfırlanıyor...' : "🔄 PIN'i Sıfırla"}
+                </button>
               </div>
 
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">

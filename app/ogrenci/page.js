@@ -4,6 +4,9 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import { getAcademicInfo } from '@/lib/academic';
 
+const PIN_COLUMN = 'pin_code';
+const WEAK_PINS = new Set(['0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999', '1234', '4321']);
+
 function normalizeClassValue(val) {
   return String(val ?? '')
     .normalize('NFKC')
@@ -11,15 +14,37 @@ function normalizeClassValue(val) {
     .toLocaleUpperCase('tr-TR');
 }
 
+function isValidFourDigitPin(pin) {
+  return /^\d{4}$/.test(String(pin ?? '').trim());
+}
+
 export default function StudentPortalPage() {
   const currentAcademic = getAcademicInfo();
 
-  // Oturum State'leri
+  // Oturum ve PIN Akışı State'leri
   const [currentStudent, setCurrentStudent] = useState(null);
+  const [pendingStudent, setPendingStudent] = useState(null); // 'setup' | 'verify' için doğrulanmış aday
+  const [authStep, setAuthStep] = useState('credentials'); // 'credentials' | 'setup_pin' | 'verify_pin'
+
   const [inputNo, setInputNo] = useState('');
   const [inputClass, setInputClass] = useState('');
+  const [pinInput, setPinInput] = useState('');
+  const [pinConfirmInput, setPinConfirmInput] = useState('');
+  const [showForgotHelp, setShowForgotHelp] = useState(false);
+
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [lockUntil, setLockUntil] = useState(0);
   const [loginError, setLoginError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+
+  // Oturum İçi PIN Değiştirme Modalı State'leri
+  const [showChangePinModal, setShowChangePinModal] = useState(false);
+  const [currentPinInput, setCurrentPinInput] = useState('');
+  const [newPinInput, setNewPinInput] = useState('');
+  const [newPinConfirmInput, setNewPinConfirmInput] = useState('');
+  const [changePinError, setChangePinError] = useState('');
+  const [changePinSuccess, setChangePinSuccess] = useState('');
+  const [savingPin, setSavingPin] = useState(false);
 
   // Veri State'leri
   const [loading, setLoading] = useState(false);
@@ -136,8 +161,8 @@ export default function StudentPortalPage() {
     setLoading(false);
   };
 
-  // 3. Okul Numarası ve Sınıf/Şube ile Doğrulanmış Giriş Yap
-  const handleLogin = async (e) => {
+  // 3A. Okul Numarası ve Sınıf/Şube Kontrolü -> PIN Kurulum veya PIN Doğrulama Adımına Geç
+  const handleCredentialSubmit = async (e) => {
     e.preventDefault();
     const cleanNo = inputNo.trim();
     const cleanClass = normalizeClassValue(inputClass);
@@ -149,6 +174,7 @@ export default function StudentPortalPage() {
 
     setAuthLoading(true);
     setLoginError('');
+    setShowForgotHelp(false);
 
     const { data, error } = await supabase
       .from('students')
@@ -171,15 +197,182 @@ export default function StudentPortalPage() {
       return;
     }
 
-    fetchStudentProfile(matchedStudent.id);
+    setPendingStudent(matchedStudent);
+    setPinInput('');
+    setPinConfirmInput('');
+    setFailedAttempts(0);
+    setLockUntil(0);
+
+    const existingPin = String(matchedStudent[PIN_COLUMN] ?? '').trim();
+    if (isValidFourDigitPin(existingPin)) {
+      setAuthStep('verify_pin');
+    } else {
+      setAuthStep('setup_pin');
+    }
+  };
+
+  // 3B. İlk Girişte 4 Haneli PIN Belirleme
+  const handleSetupPinSubmit = async (e) => {
+    e.preventDefault();
+    if (!pendingStudent) return;
+
+    const cleanPin = pinInput.trim();
+    const cleanConfirm = pinConfirmInput.trim();
+
+    if (!isValidFourDigitPin(cleanPin)) {
+      setLoginError('PIN tam olarak 4 rakamdan oluşmalıdır (örneğin 5824).');
+      return;
+    }
+    if (WEAK_PINS.has(cleanPin)) {
+      setLoginError('Çok kolay veya ardışık bir PIN seçmeyin (örneğin 1234, 0000).');
+      return;
+    }
+    if (cleanPin !== cleanConfirm) {
+      setLoginError('Girdiğiniz iki PIN birbiriyle uyuşmuyor.');
+      return;
+    }
+
+    setAuthLoading(true);
+    setLoginError('');
+
+    const { error } = await supabase
+      .from('students')
+      .update({ [PIN_COLUMN]: cleanPin })
+      .eq('id', pendingStudent.id);
+
+    setAuthLoading(false);
+
+    if (error) {
+      setLoginError('PIN kaydedilemedi: ' + error.message);
+      return;
+    }
+
+    const updatedStudent = { ...pendingStudent, [PIN_COLUMN]: cleanPin };
+    setPendingStudent(null);
+    setAuthStep('credentials');
+    setInputNo('');
+    setInputClass('');
+    setPinInput('');
+    setPinConfirmInput('');
+    fetchStudentProfile(updatedStudent.id);
+  };
+
+  // 3C. Mevcut 4 Haneli PIN ile Giriş Doğrulama
+  const handleVerifyPinSubmit = async (e) => {
+    e.preventDefault();
+    if (!pendingStudent) return;
+
+    const now = Date.now();
+    if (lockUntil > now) {
+      const remainingSec = Math.ceil((lockUntil - now) / 1000);
+      setLoginError(`Çok fazla hatalı deneme yapıldı. Lütfen ${remainingSec} saniye bekleyin.`);
+      return;
+    }
+
+    const cleanPin = pinInput.trim();
+    if (!isValidFourDigitPin(cleanPin)) {
+      setLoginError('Lütfen 4 haneli PIN kodunuzu girin.');
+      return;
+    }
+
+    const savedPin = String(pendingStudent[PIN_COLUMN] ?? '').trim();
+    if (cleanPin !== savedPin) {
+      const nextAttempts = failedAttempts + 1;
+      setFailedAttempts(nextAttempts);
+      setPinInput('');
+
+      if (nextAttempts >= 5) {
+        setLockUntil(Date.now() + 30000);
+        setFailedAttempts(0);
+        setLoginError('5 hatalı PIN denemesi yapıldı. 30 saniye sonra tekrar deneyin.');
+      } else {
+        setLoginError(`PIN hatalı (Kalan deneme hakkı: ${5 - nextAttempts}).`);
+      }
+      return;
+    }
+
+    const verifiedStudent = pendingStudent;
+    setPendingStudent(null);
+    setAuthStep('credentials');
+    setInputNo('');
+    setInputClass('');
+    setPinInput('');
+    setLoginError('');
+    setFailedAttempts(0);
+    fetchStudentProfile(verifiedStudent.id);
+  };
+
+  // 3D. Oturum Açıkken Mevcut PIN ile Yeni PIN Belirleme
+  const handleChangePinSubmit = async (e) => {
+    e.preventDefault();
+    if (!currentStudent) return;
+
+    const cleanCurrent = currentPinInput.trim();
+    const cleanNew = newPinInput.trim();
+    const cleanConfirm = newPinConfirmInput.trim();
+
+    setChangePinError('');
+    setChangePinSuccess('');
+
+    const savedPin = String(currentStudent[PIN_COLUMN] ?? '').trim();
+    if (cleanCurrent !== savedPin) {
+      setChangePinError('Mevcut PIN kodunuz hatalı.');
+      return;
+    }
+
+    if (!isValidFourDigitPin(cleanNew)) {
+      setChangePinError('Yeni PIN tam olarak 4 rakamdan oluşmalıdır.');
+      return;
+    }
+
+    if (WEAK_PINS.has(cleanNew)) {
+      setChangePinError('Çok kolay veya ardışık bir PIN seçmeyin.');
+      return;
+    }
+
+    if (cleanNew !== cleanConfirm) {
+      setChangePinError('Yeni PIN ile tekrarı uyuşmuyor.');
+      return;
+    }
+
+    setSavingPin(true);
+    const { error } = await supabase
+      .from('students')
+      .update({ [PIN_COLUMN]: cleanNew })
+      .eq('id', currentStudent.id);
+    setSavingPin(false);
+
+    if (error) {
+      setChangePinError('PIN güncellenemedi: ' + error.message);
+      return;
+    }
+
+    const updated = { ...currentStudent, [PIN_COLUMN]: cleanNew };
+    setCurrentStudent(updated);
+    localStorage.setItem('haskoy_student_session', JSON.stringify(updated));
+    setCurrentPinInput('');
+    setNewPinInput('');
+    setNewPinConfirmInput('');
+    setChangePinSuccess('✓ 4 haneli PIN kodunuz başarıyla güncellendi!');
+    setTimeout(() => {
+      setShowChangePinModal(false);
+      setChangePinSuccess('');
+    }, 1500);
   };
 
   // 4. Çıkış Yap
   const handleLogout = () => {
     localStorage.removeItem('haskoy_student_session');
     setCurrentStudent(null);
+    setPendingStudent(null);
+    setAuthStep('credentials');
     setInputNo('');
     setInputClass('');
+    setPinInput('');
+    setPinConfirmInput('');
+    setLoginError('');
+    setShowForgotHelp(false);
+    setShowChangePinModal(false);
   };
 
   // 5. Favoriye Ekle / Çıkar
@@ -240,64 +433,205 @@ export default function StudentPortalPage() {
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 antialiased selection:bg-indigo-500 selection:text-white">
         <div className="max-w-md w-full bg-slate-800/80 backdrop-blur-xl border border-slate-700/80 rounded-3xl p-7 shadow-2xl text-center space-y-6">
           <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-indigo-600 to-blue-500 flex items-center justify-center text-3xl mx-auto shadow-lg shadow-indigo-500/30">
-            📖
+            {authStep === 'setup_pin' ? '🔐' : authStep === 'verify_pin' ? '🔑' : '📖'}
           </div>
 
           <div>
             <span className="text-[11px] font-bold tracking-widest uppercase text-indigo-400">
               Hasköy Ortaokulu Kütüphanesi • {currentAcademic.academicYear}
             </span>
-            <h1 className="text-2xl font-black text-white tracking-tight mt-1">Öğrenci Okur Portalı</h1>
+            <h1 className="text-2xl font-black text-white tracking-tight mt-1">
+              {authStep === 'setup_pin'
+                ? 'İlk PIN Kodunu Belirle'
+                : authStep === 'verify_pin'
+                ? '4 Haneli PIN Girişi'
+                : 'Öğrenci Okur Portalı'}
+            </h1>
             <p className="text-xs text-slate-400 mt-1">
-              Kütüphane kataloğunda kitap arayın, elinizdeki iade gününü ve okuma geçmişinizi takip edin.
+              {authStep === 'setup_pin'
+                ? `Merhaba ${pendingStudent?.full_name}, hesabını korumak için 4 haneli bir PIN oluştur.`
+                : authStep === 'verify_pin'
+                ? `${pendingStudent?.full_name} (${pendingStudent?.grade_class}) için 4 haneli PIN kodunu gir.`
+                : 'Kütüphane kataloğunda kitap arayın, elinizdeki iade gününü ve okuma geçmişinizi takip edin.'}
             </p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-4 text-left">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {authStep === 'credentials' && (
+            <form onSubmit={handleCredentialSubmit} className="space-y-4 text-left">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Okul Numaranız
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="Örn: 125"
+                    value={inputNo}
+                    onChange={(e) => setInputNo(e.target.value)}
+                    required
+                    className="w-full text-base font-bold p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 focus:border-indigo-500 outline-none transition font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Sınıf / Şube
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Örn: 6A"
+                    value={inputClass}
+                    onChange={(e) => setInputClass(e.target.value)}
+                    required
+                    className="w-full text-base font-bold p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 focus:border-indigo-500 outline-none transition uppercase"
+                  />
+                </div>
+              </div>
+
+              {loginError && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium">
+                  {loginError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition cursor-pointer active:scale-95 disabled:opacity-50"
+              >
+                {authLoading ? 'Kontrol Ediliyor...' : 'Devam Et →'}
+              </button>
+            </form>
+          )}
+
+          {authStep === 'setup_pin' && (
+            <form onSubmit={handleSetupPinSubmit} className="space-y-4 text-left">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Yeni PIN (4 Rakam)
+                  </label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="••••"
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    required
+                    className="w-full text-center text-lg font-black tracking-[0.4em] p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 focus:border-indigo-500 outline-none transition font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                    PIN Tekrarı
+                  </label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="••••"
+                    value={pinConfirmInput}
+                    onChange={(e) => setPinConfirmInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    required
+                    className="w-full text-center text-lg font-black tracking-[0.4em] p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 focus:border-indigo-500 outline-none transition font-mono"
+                  />
+                </div>
+              </div>
+
+              {loginError && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium">
+                  {loginError}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthStep('credentials');
+                    setPendingStudent(null);
+                    setLoginError('');
+                  }}
+                  className="px-4 py-3.5 rounded-2xl bg-slate-700/70 hover:bg-slate-700 text-slate-200 font-bold text-xs transition cursor-pointer"
+                >
+                  ← Geri
+                </button>
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="flex-1 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  {authLoading ? 'Kaydediliyor...' : 'PIN Oluştur ve Giriş Yap 🚀'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {authStep === 'verify_pin' && (
+            <form onSubmit={handleVerifyPinSubmit} className="space-y-4 text-left">
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Okul Numaranız
+                  4 Haneli PIN Kodunuz
                 </label>
                 <input
-                  type="number"
-                  placeholder="Örn: 125"
-                  value={inputNo}
-                  onChange={(e) => setInputNo(e.target.value)}
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  placeholder="••••"
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
                   required
-                  className="w-full text-base font-bold p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 focus:border-indigo-500 outline-none transition font-mono"
+                  className="w-full text-center text-xl font-black tracking-[0.5em] p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 focus:border-indigo-500 outline-none transition font-mono"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Sınıf / Şube
-                </label>
-                <input
-                  type="text"
-                  placeholder="Örn: 6A"
-                  value={inputClass}
-                  onChange={(e) => setInputClass(e.target.value)}
-                  required
-                  className="w-full text-base font-bold p-3.5 rounded-2xl bg-slate-900/80 border border-slate-700 text-white placeholder-slate-500 focus:border-indigo-500 outline-none transition uppercase"
-                />
-              </div>
-            </div>
+              {loginError && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium">
+                  {loginError}
+                </div>
+              )}
 
-            {loginError && (
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-medium">
-                {loginError}
-              </div>
-            )}
+              <div className="flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthStep('credentials');
+                    setPendingStudent(null);
+                    setLoginError('');
+                    setShowForgotHelp(false);
+                  }}
+                  className="text-slate-400 hover:text-white transition cursor-pointer"
+                >
+                  ← Numara / Sınıf Değiştir
+                </button>
 
-            <button
-              type="submit"
-              disabled={authLoading}
-              className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition cursor-pointer active:scale-95 disabled:opacity-50"
-            >
-              {authLoading ? 'Doğrulanıyor...' : 'Kitaplığıma Giriş Yap 🚀'}
-            </button>
-          </form>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotHelp((prev) => !prev)}
+                  className="text-amber-400 hover:text-amber-300 font-semibold transition cursor-pointer"
+                >
+                  PIN'imi Unuttum
+                </button>
+              </div>
+
+              {showForgotHelp && (
+                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs leading-relaxed">
+                  Güvenlik nedeniyle PIN sıfırlama işlemi kendi başınıza yapılamaz. Lütfen{' '}
+                  <strong>Kütüphane Rehber Öğretmenine</strong> veya <strong>kütüphane yetkilisine</strong> başvurarak PIN'inizin sıfırlanmasını isteyin.
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition cursor-pointer active:scale-95 disabled:opacity-50"
+              >
+                {authLoading ? 'Doğrulanıyor...' : 'Kitaplığıma Giriş Yap 🚀'}
+              </button>
+            </form>
+          )}
 
           <div className="pt-2 border-t border-slate-700/60">
             <Link href="/" className="text-xs text-slate-500 hover:text-slate-300 transition">
@@ -336,6 +670,20 @@ export default function StudentPortalPage() {
             >
               <span>⭐</span>
               <span className="hidden sm:inline">Bana Kitap Öner</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setChangePinError('');
+                setChangePinSuccess('');
+                setCurrentPinInput('');
+                setNewPinInput('');
+                setNewPinConfirmInput('');
+                setShowChangePinModal(true);
+              }}
+              className="text-xs font-semibold text-slate-600 hover:text-indigo-600 px-3 py-2 rounded-xl hover:bg-slate-100 transition cursor-pointer"
+            >
+              🔑 <span className="hidden sm:inline">PIN Değiştir</span>
             </button>
 
             <button
@@ -615,6 +963,98 @@ export default function StudentPortalPage() {
           </div>
         )}
       </main>
+
+      {/* PIN DEĞİŞTİRME MODALI */}
+      {showChangePinModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-sm w-full p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-sm text-slate-900">4 Haneli PIN Kodunu Değiştir</h3>
+              <button
+                type="button"
+                onClick={() => setShowChangePinModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-lg leading-none cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePinSubmit} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">Mevcut PIN</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  placeholder="••••"
+                  value={currentPinInput}
+                  onChange={(e) => setCurrentPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  required
+                  className="w-full text-center text-base font-black tracking-[0.4em] p-2.5 border border-slate-200 rounded-xl bg-slate-50 font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">Yeni PIN</label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="••••"
+                    value={newPinInput}
+                    onChange={(e) => setNewPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    required
+                    className="w-full text-center text-base font-black tracking-[0.4em] p-2.5 border border-slate-200 rounded-xl bg-slate-50 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">Yeni PIN Tekrar</label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="••••"
+                    value={newPinConfirmInput}
+                    onChange={(e) => setNewPinConfirmInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    required
+                    className="w-full text-center text-base font-black tracking-[0.4em] p-2.5 border border-slate-200 rounded-xl bg-slate-50 font-mono"
+                  />
+                </div>
+              </div>
+
+              {changePinError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+                  {changePinError}
+                </div>
+              )}
+
+              {changePinSuccess && (
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
+                  {changePinSuccess}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowChangePinModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPin}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer disabled:opacity-50"
+                >
+                  {savingPin ? 'Kaydediliyor...' : 'PIN Güncelle'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {showRecommendModal && recommendedBook && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
