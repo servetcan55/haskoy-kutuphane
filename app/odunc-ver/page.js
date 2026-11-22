@@ -15,35 +15,123 @@ export default function LoanDeskPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
 
+  // 1000 kayıt sınırını aşarak tüm kayıtları bloklar halinde çeken yardımcı fonksiyon
+  const fetchAllRows = async (tableName, selectQuery, orderColumn, ascending = true) => {
+    let allRows = [];
+    const step = 1000;
+    let from = 0;
+    let to = 999;
+    let keepFetching = true;
+
+    while (keepFetching) {
+      let query = supabase.from(tableName).select(selectQuery);
+      if (orderColumn) {
+        query = query.order(orderColumn, { ascending });
+      }
+      const { data, error } = await query.range(from, to);
+
+      if (error) {
+        throw error;
+      }
+
+      if (data && data.length > 0) {
+        allRows = [...allRows, ...data];
+        if (data.length < step) {
+          keepFetching = false;
+        } else {
+          from += step;
+          to += step;
+        }
+      } else {
+        keepFetching = false;
+      }
+    }
+
+    return allRows;
+  };
+
   useEffect(() => {
     const fetchData = async () => {
-      const [stRes, bkRes] = await Promise.all([
-        supabase.from('students').select('*').order('full_name', { ascending: true }),
-        supabase.from('books').select('*').order('title', { ascending: true }),
-      ]);
-      setStudents(stRes.data || []);
-      setBooks(bkRes.data || []);
+      try {
+        const [allStudents, allBooks] = await Promise.all([
+          fetchAllRows('students', '*', 'full_name', true),
+          fetchAllRows('books', '*', 'title', true),
+        ]);
+        setStudents(allStudents);
+        setBooks(allBooks);
+      } catch (err) {
+        setMessage({ text: 'Veriler yüklenirken hata: ' + err.message, type: 'error' });
+      }
     };
     fetchData();
   }, []);
 
-  const filteredBooks = books.filter((b) => {
-    const q = bookSearch.toLowerCase().trim();
-    return (
-      b.title?.toLowerCase().includes(q) ||
-      b.author?.toLowerCase().includes(q) ||
-      b.isbn?.toLowerCase().includes(q) ||
-      String(b.id) === q
+  const normalizedBookQuery = bookSearch.toLowerCase().trim();
+
+  const filteredBooks = books
+    .filter((b) => {
+      if (!normalizedBookQuery) return true;
+
+      const title = String(b.title ?? '').toLowerCase();
+      const author = String(b.author ?? '').toLowerCase();
+      const isbn = String(b.isbn ?? '').toLowerCase();
+      const demirbasNo = String(b.demirbas_no ?? '').toLowerCase();
+      const idStr = String(b.id ?? '').toLowerCase();
+
+      return (
+        title.includes(normalizedBookQuery) ||
+        author.includes(normalizedBookQuery) ||
+        isbn.includes(normalizedBookQuery) ||
+        demirbasNo.includes(normalizedBookQuery) ||
+        idStr === normalizedBookQuery
+      );
+    })
+    .sort((a, b) => {
+      if (!normalizedBookQuery) return 0;
+
+      const aDemirbas = String(a.demirbas_no ?? '').trim().toLowerCase();
+      const bDemirbas = String(b.demirbas_no ?? '').trim().toLowerCase();
+
+      const aExact = aDemirbas === normalizedBookQuery ? 1 : 0;
+      const bExact = bDemirbas === normalizedBookQuery ? 1 : 0;
+      if (aExact !== bExact) return bExact - aExact;
+
+      const aIncludes = aDemirbas.includes(normalizedBookQuery) ? 1 : 0;
+      const bIncludes = bDemirbas.includes(normalizedBookQuery) ? 1 : 0;
+      if (aIncludes !== bIncludes) return bIncludes - aIncludes;
+
+      return 0;
+    });
+
+  // Barkod okuyucu sonunda Enter gönderdiğinde tek eşleşen kitabı seçer
+  const handleBookKeyDown = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+
+    if (!normalizedBookQuery) return;
+
+    const availableMatches = books.filter(
+      (b) =>
+        (b.available_copies || 0) > 0 &&
+        (String(b.isbn ?? '').trim().toLowerCase() === normalizedBookQuery ||
+          String(b.demirbas_no ?? '').trim().toLowerCase() === normalizedBookQuery ||
+          `hk-${String(b.id).padStart(5, '0')}` === normalizedBookQuery)
     );
-  });
+
+    if (availableMatches.length === 1) {
+      setSelectedBook(availableMatches[0]);
+    }
+  };
 
   const filteredStudents = students.filter((s) => {
     const q = studentSearch.toLowerCase().trim();
-    return (
-      s.full_name?.toLowerCase().includes(q) ||
-      s.student_number?.toLowerCase().includes(q) ||
-      s.grade_class?.toLowerCase().includes(q)
-    );
+    if (!q) return true;
+
+    const fullName = String(s.full_name ?? '').toLowerCase();
+    const studentNumber = String(s.student_number ?? '').toLowerCase();
+    const gradeClass = String(s.grade_class ?? '').toLowerCase();
+
+    return fullName.includes(q) || studentNumber.includes(q) || gradeClass.includes(q);
   });
 
   const handleLendBook = async () => {
@@ -93,8 +181,9 @@ export default function LoanDeskPage() {
       prev.map((b) => (b.id === selectedBook.id ? { ...b, available_copies: newCopies } : b))
     );
 
+    const demirbasInfo = selectedBook.demirbas_no ? ` [Demirbaş: ${selectedBook.demirbas_no}]` : '';
     setMessage({
-      text: `✓ "${selectedBook.title}" başarıyla ${selectedStudent.full_name} (${selectedStudent.grade_class}) öğrencisine verildi. Son teslim: ${dueDate.toLocaleDateString('tr-TR')}`,
+      text: `✓ "${selectedBook.title}"${demirbasInfo} başarıyla ${selectedStudent.full_name} (${selectedStudent.grade_class}) öğrencisine verildi. Son teslim: ${dueDate.toLocaleDateString('tr-TR')}`,
       type: 'success',
     });
 
@@ -116,10 +205,6 @@ export default function LoanDeskPage() {
           <p className="text-xs text-slate-400">Barkod okutarak veya listeden seçerek saniyeler içinde öğrenciye teslim edin</p>
         </div>
 
-        {/* 
-          HATA BURADAYDI: href="/" olan bağlantıyı href="/dashboard" olarak düzelttim.
-          Eğer yönetici paneli ana sayfanızın adresi farklıysa (örneğin /admin), lütfen /dashboard kısmını değiştirin.
-        */}
         <Link
           href="/dashboard"
           className="text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-xl transition shadow-2xs flex items-center gap-1.5"
@@ -195,7 +280,7 @@ export default function LoanDeskPage() {
                 {filteredStudents.length === 0 ? (
                   <p className="p-6 text-center text-xs text-slate-400">Eşleşen öğrenci bulunamadı.</p>
                 ) : (
-                  filteredStudents.slice(0, 10).map((st) => (
+                  filteredStudents.slice(0, 25).map((st) => (
                     <div
                       key={st.id}
                       onClick={() => setSelectedStudent(st)}
@@ -250,8 +335,15 @@ export default function LoanDeskPage() {
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 block">Seçilen Kitap</span>
-                <h4 className="font-bold text-slate-900 text-sm truncate">{selectedBook.title}</h4>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Seçilen Kitap</span>
+                  {selectedBook.demirbas_no && (
+                    <span className="font-mono text-[10px] bg-sky-100 text-sky-800 px-2 py-0.5 rounded font-bold border border-sky-200">
+                      🏷️ Demirbaş: {selectedBook.demirbas_no}
+                    </span>
+                  )}
+                </div>
+                <h4 className="font-bold text-slate-900 text-sm truncate mt-0.5">{selectedBook.title}</h4>
                 <p className="text-xs text-slate-500 truncate">{selectedBook.author}</p>
                 <p className="text-[11px] text-slate-400 font-mono mt-0.5">
                   Raf: <strong>{selectedBook.shelf_location || 'Yok'}</strong> • Rafta: <strong className="text-emerald-600">{selectedBook.available_copies} adet</strong>
@@ -269,15 +361,10 @@ export default function LoanDeskPage() {
                 </span>
                 <input
                   type="text"
-                  placeholder="Barkod okutun veya kitap adı/yazar yazın..."
+                  placeholder="Barkod, demirbaş no, kitap adı veya yazar yazın..."
                   value={bookSearch}
-                  onChange={(e) => {
-                    setBookSearch(e.target.value);
-                    const exact = books.find(
-                      (b) => b.isbn === e.target.value.trim() || `HK-${String(b.id).padStart(5, '0')}` === e.target.value.trim()
-                    );
-                    if (exact) setSelectedBook(exact);
-                  }}
+                  onChange={(e) => setBookSearch(e.target.value)}
+                  onKeyDown={handleBookKeyDown}
                   className="w-full pl-8 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white font-mono transition"
                 />
               </div>
@@ -286,13 +373,13 @@ export default function LoanDeskPage() {
                 {filteredBooks.length === 0 ? (
                   <p className="p-6 text-center text-xs text-slate-400">Kitap bulunamadı.</p>
                 ) : (
-                  filteredBooks.slice(0, 10).map((bk) => {
+                  filteredBooks.slice(0, 60).map((bk) => {
                     const inStock = (bk.available_copies || 0) > 0;
                     return (
                       <div
                         key={bk.id}
                         onClick={() => inStock && setSelectedBook(bk)}
-                        className={`p-3 flex items-center justify-between transition group ${
+                        className={`p-3 flex items-center justify-between gap-2 transition group ${
                           inStock ? 'hover:bg-slate-50 cursor-pointer' : 'opacity-40 cursor-not-allowed bg-slate-50/50'
                         }`}
                       >
@@ -305,8 +392,17 @@ export default function LoanDeskPage() {
                             </div>
                           )}
                           <div className="min-w-0">
-                            <h5 className="text-xs font-bold text-slate-800 truncate group-hover:text-blue-600">{bk.title}</h5>
-                            <p className="text-[10px] text-slate-400 truncate">{bk.author} • Raf: {bk.shelf_location || '-'}</p>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h5 className="text-xs font-bold text-slate-800 truncate group-hover:text-blue-600">{bk.title}</h5>
+                              {bk.demirbas_no && (
+                                <span className="font-mono text-[10px] bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded font-bold border border-sky-100 shrink-0">
+                                  🏷️ {bk.demirbas_no}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-slate-400 truncate">
+                              {bk.author || 'Yazar Yok'} • Raf: {bk.shelf_location || '-'}
+                            </p>
                           </div>
                         </div>
 
