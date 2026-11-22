@@ -3,10 +3,13 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 
+const PAGE_SIZE = 50;
+
 export default function KitaplarPage() {
   const [books, setBooks] = useState([]);
   const [search, setSearch] = useState('');
-  
+  const [currentPage, setCurrentPage] = useState(1);
+
   // Sıralama tercihini localStorage'dan başlatıyoruz (varsayılan: 'demirbas_asc')
   const [sortBy, setSortBy] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -45,11 +48,24 @@ export default function KitaplarPage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Sıralama değiştiğinde tarayıcı hafızasına kaydediyoruz
+  // Sıralama değiştiğinde tarayıcı hafızasına kaydediyoruz ve 1. sayfaya dönüyoruz
   const handleSortChange = (newSort) => {
     setSortBy(newSort);
+    setCurrentPage(1);
     if (typeof window !== 'undefined') {
       localStorage.setItem('haskoy_book_sort', newSort);
+    }
+  };
+
+  const handleSearchChange = (value) => {
+    setSearch(value);
+    setCurrentPage(1);
+  };
+
+  const goToPage = (pageNumber) => {
+    setCurrentPage(pageNumber);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
@@ -171,8 +187,7 @@ export default function KitaplarPage() {
     if (sortBy === 'demirbas_asc') {
       const aNo = (a.demirbas_no || '').trim();
       const bNo = (b.demirbas_no || '').trim();
-      
-      // Demirbaş numarası olmayanları en alta gönder
+
       if (!aNo && bNo) return 1;
       if (aNo && !bNo) return -1;
       if (!aNo && !bNo) return 0;
@@ -181,7 +196,7 @@ export default function KitaplarPage() {
     } else if (sortBy === 'demirbas_desc') {
       const aNo = (a.demirbas_no || '').trim();
       const bNo = (b.demirbas_no || '').trim();
-      
+
       if (!aNo && bNo) return 1;
       if (aNo && !bNo) return -1;
       if (!aNo && !bNo) return 0;
@@ -196,6 +211,99 @@ export default function KitaplarPage() {
     }
     return 0;
   });
+
+  // 50'lik Sayfalama Hesaplamaları
+  const totalPages = Math.max(1, Math.ceil(filteredBooks.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * PAGE_SIZE;
+  const endIndex = Math.min(startIndex + PAGE_SIZE, filteredBooks.length);
+  const paginatedBooks = filteredBooks.slice(startIndex, startIndex + PAGE_SIZE);
+
+  const getVisiblePageNumbers = () => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    const pages = new Set([1, totalPages, safePage - 1, safePage, safePage + 1]);
+    return Array.from(pages)
+      .filter((p) => p >= 1 && p <= totalPages)
+      .sort((a, b) => a - b);
+  };
+
+  const renderPaginationBar = () => {
+    if (filteredBooks.length <= PAGE_SIZE) return null;
+
+    const visiblePages = getVisiblePageNumbers();
+
+    return (
+      <div className="bg-white/80 backdrop-blur-md px-4 py-3 rounded-2xl border border-slate-200/90 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+        <div className="text-slate-500 font-medium">
+          Gösterilen: <strong className="text-slate-800 font-mono">{startIndex + 1}–{endIndex}</strong> /{' '}
+          <strong className="text-slate-800 font-mono">{filteredBooks.length}</strong> eser
+          <span className="text-slate-400 ml-2 font-mono">
+            (Sayfa {safePage} / {totalPages})
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-wrap justify-center">
+          <button
+            type="button"
+            disabled={safePage === 1}
+            onClick={() => goToPage(1)}
+            className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none transition cursor-pointer"
+          >
+            « İlk
+          </button>
+          <button
+            type="button"
+            disabled={safePage === 1}
+            onClick={() => goToPage(safePage - 1)}
+            className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none transition cursor-pointer"
+          >
+            ‹ Önceki
+          </button>
+
+          {visiblePages.map((pageNum, idx) => {
+            const prevPage = visiblePages[idx - 1];
+            const showEllipsis = prevPage && pageNum - prevPage > 1;
+
+            return (
+              <span key={pageNum} className="flex items-center gap-1.5">
+                {showEllipsis && <span className="px-1 text-slate-400 font-mono">...</span>}
+                <button
+                  type="button"
+                  onClick={() => goToPage(pageNum)}
+                  className={`min-w-[34px] h-8 px-2.5 rounded-xl font-bold font-mono transition cursor-pointer ${
+                    pageNum === safePage
+                      ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {pageNum}
+                </button>
+              </span>
+            );
+          })}
+
+          <button
+            type="button"
+            disabled={safePage === totalPages}
+            onClick={() => goToPage(safePage + 1)}
+            className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none transition cursor-pointer"
+          >
+            Sonraki ›
+          </button>
+          <button
+            type="button"
+            disabled={safePage === totalPages}
+            onClick={() => goToPage(totalPages)}
+            className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold hover:bg-slate-50 disabled:opacity-40 disabled:pointer-events-none transition cursor-pointer"
+          >
+            Son »
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto antialiased">
@@ -255,7 +363,7 @@ export default function KitaplarPage() {
             type="text"
             placeholder="Demirbaş no, kitap adı, yazar, tür veya ISBN ile ara..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="w-full pl-9 pr-4 py-2.5 bg-slate-50/80 border border-slate-200 rounded-xl text-xs text-slate-800 outline-none focus:border-blue-500 focus:bg-white transition"
           />
         </div>
@@ -278,11 +386,13 @@ export default function KitaplarPage() {
           </div>
 
           <span className="text-xs text-slate-400 font-mono hidden md:inline">
-            (<strong className="text-slate-700">{filteredBooks.length}</strong> eser)
+            (<strong className="text-slate-700">{filteredBooks.length}</strong> eser • Sayfa <strong className="text-slate-700">{safePage}/{totalPages}</strong>)
           </span>
-
         </div>
       </div>
+
+      {/* Üst Sayfalama Çubuğu */}
+      {!loading && filteredBooks.length > 0 && renderPaginationBar()}
 
       {/* Kitap Envanteri Listesi */}
       {loading ? (
@@ -294,8 +404,10 @@ export default function KitaplarPage() {
       ) : (
         <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.03)] overflow-hidden">
           <div className="divide-y divide-slate-100">
-            {filteredBooks.map((b, index) => {
+            {paginatedBooks.map((b, index) => {
               const inStock = (b.available_copies || 0) > 0;
+              const globalOrderNo = startIndex + index + 1;
+
               return (
                 <div
                   key={b.id}
@@ -306,6 +418,7 @@ export default function KitaplarPage() {
                       <img
                         src={b.cover_url}
                         alt=""
+                        loading="lazy"
                         className="w-12 h-16 object-cover rounded-xl shadow-xs border border-slate-200/80 shrink-0 group-hover:scale-105 transition-transform"
                       />
                     ) : (
@@ -325,7 +438,7 @@ export default function KitaplarPage() {
                           </span>
                         )}
                         <span className="font-mono text-[10px] text-slate-400 font-bold">
-                          #{index + 1}
+                          #{globalOrderNo}
                         </span>
                       </div>
 
@@ -385,6 +498,9 @@ export default function KitaplarPage() {
           </div>
         </div>
       )}
+
+      {/* Alt Sayfalama Çubuğu */}
+      {!loading && filteredBooks.length > 0 && renderPaginationBar()}
 
       {/* Kitap Düzenleme Modalı */}
       {editingBook && (
