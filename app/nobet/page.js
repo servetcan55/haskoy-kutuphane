@@ -5,45 +5,109 @@ import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
 
 const AYLAR = {
-  ocak: 1, şubat: 2, subat: 2, mart: 3, nisan: 4, mayıs: 5, mayis: 5,
-  haziran: 6, temmuz: 7, ağustos: 8, agustos: 8, eylül: 9, eylul: 9,
-  ekim: 10, kasım: 11, kasim: 11, aralık: 12, aralik: 12,
+  ocak: 1,
+  subat: 2,
+  mart: 3,
+  nisan: 4,
+  mayis: 5,
+  haziran: 6,
+  temmuz: 7,
+  agustos: 8,
+  eylul: 9,
+  ekim: 10,
+  kasim: 11,
+  aralik: 12,
 };
 
+function normalizeTr(text) {
+  return String(text ?? '')
+    .normalize('NFKC')
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'i')
+    .replace(/ı/g, 'i')
+    .replace(/Ş/g, 's')
+    .replace(/ş/g, 's')
+    .replace(/Ğ/g, 'g')
+    .replace(/ğ/g, 'g')
+    .replace(/Ü/g, 'u')
+    .replace(/ü/g, 'u')
+    .replace(/Ö/g, 'o')
+    .replace(/ö/g, 'o')
+    .replace(/Ç/g, 'c')
+    .replace(/ç/g, 'c')
+    .toLowerCase()
+    .trim();
+}
+
+function excelSerialToISO(serial) {
+  const num = Number(serial);
+  if (!Number.isFinite(num) || num < 20000 || num > 100000) return '';
+  const utcDays = Math.floor(num - 25569);
+  const date = new Date(utcDays * 86400 * 1000);
+  if (isNaN(date.getTime())) return '';
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function parseExcelDateToISO(rawDate) {
-  if (!rawDate) return '';
+  if (rawDate === null || rawDate === undefined || rawDate === '') return '';
 
-  // Excel seri numarasıysa (örn: 46356)
+  if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
+    const y = rawDate.getFullYear();
+    const m = String(rawDate.getMonth() + 1).padStart(2, '0');
+    const d = String(rawDate.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
   if (typeof rawDate === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(rawDate);
-    if (parsed) {
-      return `${String(parsed.y).padStart(4, '0')}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
-    }
+    return excelSerialToISO(rawDate);
   }
 
-  const str = String(rawDate).trim();
+  const str = String(rawDate).normalize('NFKC').trim();
+  if (!str) return '';
 
-  // YYYY-AA-GG formatıysa
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  if (/^\d{5}(\.\d+)?$/.test(str)) {
+    return excelSerialToISO(str);
+  }
 
-  // GG.AA.YYYY veya GG/AA/YYYY formatıysa
-  const dotMatch = str.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+  const isoMatch = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+  }
+
+  const dotMatch = str.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
   if (dotMatch) {
-    return `${dotMatch[3]}-${dotMatch[2].padStart(2, '0')}-${dotMatch[1].padStart(2, '0')}`;
+    const year = dotMatch[3].length === 2 ? `20${dotMatch[3]}` : dotMatch[3];
+    return `${year}-${dotMatch[2].padStart(2, '0')}-${dotMatch[1].padStart(2, '0')}`;
   }
 
-  // "30 Kasım 2026" Türkçe metin formatıysa
-  const parts = str.split(/\s+/);
+  const parts = str.split(/[\s,.-]+/).filter(Boolean);
   if (parts.length >= 3) {
     const day = parseInt(parts[0], 10);
-    const monthNum = AYLAR[parts[1].toLocaleLowerCase('tr-TR')];
+    const monthKey = normalizeTr(parts[1]);
+    const monthNum = AYLAR[monthKey];
     const year = parseInt(parts[2], 10);
-    if (day && monthNum && year) {
+    if (day >= 1 && day <= 31 && monthNum && year >= 2000) {
       return `${String(year).padStart(4, '0')}-${String(monthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     }
   }
 
   return '';
+}
+
+function formatDisplayDate(rawDate, isoDate) {
+  if (typeof rawDate === 'string' && rawDate.trim() && !/^\d{5}/.test(rawDate.trim()) && !/^\d{4}-\d{2}-\d{2}$/.test(rawDate.trim())) {
+    return rawDate.trim();
+  }
+  if (!isoDate) return '';
+  const [y, m, d] = isoDate.split('-');
+  const monthNames = [
+    '', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+    'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
+  ];
+  return `${d} ${monthNames[parseInt(m, 10)] || m} ${y}`;
 }
 
 export default function NobetYonetimPage() {
@@ -91,16 +155,15 @@ export default function NobetYonetimPage() {
     }
   }, [user]);
 
-  // Örnek Excel Şablonu İndirme
   const handleDownloadSampleExcel = () => {
     const sampleRows = [
       ['HASKÖY ORTAOKULU KÜTÜPHANE NÖBET TABLOSU'],
       ['Örnek Şablon — Tarih, Gün ve Nöbetçi sütunlarını doldurup sisteme yükleyebilirsiniz.'],
       [],
       ['Sıra', 'Hafta', 'Tarih', 'Gün', '5. Sınıf Nöbetçisi', '6. Sınıf Nöbetçisi', '7. Sınıf Nöbetçisi'],
-      [1, '1. Hafta', '30 Kasım 2026', 'Pazartesi', 'Örnek Öğrenci 1 (5A - 101)', 'Örnek Öğrenci 2 (6A - 202)', 'Örnek Öğrenci 3 (7A - 303)'],
-      [2, '1. Hafta', '01 Aralık 2026', 'Salı', 'Örnek Öğrenci 4 (5B - 104)', 'Örnek Öğrenci 5 (6B - 205)', 'Örnek Öğrenci 6 (7B - 306)'],
-      [3, '1. Hafta', '02 Aralık 2026', 'Çarşamba', 'Örnek Öğrenci 7 (5C - 107)', 'Örnek Öğrenci 8 (6C - 208)', 'Örnek Öğrenci 9 (7C - 309)'],
+      [1, '1. Hafta', '30 Kasım 2026', 'Pazartesi', 'Ömer Emin Toprak (5A)', 'Bilal Eymen Çilingir (6A)', 'Hilal Kara (7A)'],
+      [2, '1. Hafta', '01 Aralık 2026', 'Salı', 'Yağız Marap (5A)', 'Sare Gün (6A)', 'Ali Arhan Çakır (7A)'],
+      [3, '1. Hafta', '02 Aralık 2026', 'Çarşamba', 'İkra Kaya (5B)', 'Poyraz Emir Göz (6A)', 'Zehra Dildar Çakır (7A)'],
     ];
 
     const worksheet = XLSX.utils.aoa_to_sheet(sampleRows);
@@ -119,7 +182,6 @@ export default function NobetYonetimPage() {
     XLSX.writeFile(workbook, 'Ornek_Kutuphane_Nobet_Sablonu.xlsx');
   };
 
-  // Excel Dosyasından Veri Yükleme
   const handleExcelUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -131,59 +193,78 @@ export default function NobetYonetimPage() {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array' });
 
-      // "Nöbet Çizelgesi" sayfası varsa onu, yoksa ilk sayfayı al
       const sheetName =
-        workbook.SheetNames.find((name) => name.toLocaleLowerCase('tr-TR').includes('çizelge')) ||
+        workbook.SheetNames.find((name) => normalizeTr(name).includes('cizelge')) ||
         workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
-      const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-      // Başlık satırını otomatik tespit et ("Tarih" ve "5. Sınıf" / "Nöbetçisi" içeren satır)
+      const rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
+      const formattedRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+
+      // Gerçek tablo başlık satırını bul: "tarih" sütunu ve en az bir sınıf/nöbetçi sütunu içermeli
       let headerIdx = -1;
-      for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
-        const rowText = rawRows[i].map((c) => String(c).toLocaleLowerCase('tr-TR')).join(' ');
-        if (rowText.includes('tarih') && (rowText.includes('5.') || rowText.includes('nöbet'))) {
+      for (let i = 0; i < Math.min(rawRows.length, 20); i++) {
+        const normalizedCells = (formattedRows[i] || rawRows[i] || []).map((c) => normalizeTr(c));
+        const hasTarihCol = normalizedCells.some((c) => c === 'tarih' || c.startsWith('tarih'));
+        const hasGradeCol = normalizedCells.some(
+          (c) => c.includes('5.') || c.includes('6.') || c.includes('7.') || c.includes('sinif')
+        );
+        if (hasTarihCol && hasGradeCol) {
           headerIdx = i;
           break;
         }
       }
 
       if (headerIdx === -1) {
-        throw new Error('Excel dosyasında "Tarih" ve nöbetçi sütunlarını içeren başlık satırı bulunamadı.');
+        throw new Error('Excel dosyasında "Tarih" ve sınıf/nöbetçi sütunlarını içeren başlık satırı bulunamadı.');
       }
 
-      const headers = rawRows[headerIdx].map((h) => String(h).toLocaleLowerCase('tr-TR').trim());
+      const headers = (formattedRows[headerIdx] || rawRows[headerIdx]).map((h) => normalizeTr(h));
       const colIndex = {
-        sira: headers.findIndex((h) => h.includes('sıra')),
-        hafta: headers.findIndex((h) => h.includes('hafta')),
-        tarih: headers.findIndex((h) => h.includes('tarih')),
-        gun: headers.findIndex((h) => h.includes('gün')),
-        sinif_5: headers.findIndex((h) => h.includes('5.')),
-        sinif_6: headers.findIndex((h) => h.includes('6.')),
-        sinif_7: headers.findIndex((h) => h.includes('7.')),
+        sira: headers.findIndex((h) => h === 'sira' || h.includes('sira')),
+        hafta: headers.findIndex((h) => h === 'hafta' || h.includes('hafta')),
+        tarih: headers.findIndex((h) => h === 'tarih' || h.startsWith('tarih')),
+        gun: headers.findIndex((h) => h === 'gun' || h.includes('gun')),
+        sinif_5: headers.findIndex((h) => h.includes('5.') || h.startsWith('5 ')),
+        sinif_6: headers.findIndex((h) => h.includes('6.') || h.startsWith('6 ')),
+        sinif_7: headers.findIndex((h) => h.includes('7.') || h.startsWith('7 ')),
       };
 
       const parsedRecords = [];
+      let sampleUnparsedDate = '';
+
       for (let r = headerIdx + 1; r < rawRows.length; r++) {
-        const row = rawRows[r];
-        if (!row || row.every((cell) => String(cell).trim() === '')) continue;
+        const rawRow = rawRows[r] || [];
+        const fmtRow = formattedRows[r] || rawRow;
+        if (fmtRow.every((cell) => String(cell ?? '').trim() === '')) continue;
 
-        const rawTarih = colIndex.tarih >= 0 ? row[colIndex.tarih] : '';
-        const dutyDateISO = parseExcelDateToISO(rawTarih);
-        if (!dutyDateISO) continue; // Tarih olmayan dipnot/toplam satırlarını atla
+        const rawTarih = colIndex.tarih >= 0 ? rawRow[colIndex.tarih] : '';
+        const fmtTarih = colIndex.tarih >= 0 ? fmtRow[colIndex.tarih] : '';
 
-        const sinif5 = colIndex.sinif_5 >= 0 ? String(row[colIndex.sinif_5] ?? '').trim() : '';
-        const sinif6 = colIndex.sinif_6 >= 0 ? String(row[colIndex.sinif_6] ?? '').trim() : '';
-        const sinif7 = colIndex.sinif_7 >= 0 ? String(row[colIndex.sinif_7] ?? '').trim() : '';
+        // Tekrarlayan alt başlık satırlarını atla
+        const normTarih = normalizeTr(fmtTarih);
+        if (!normTarih || normTarih === 'tarih' || normTarih === 'sira') continue;
+
+        const dutyDateISO = parseExcelDateToISO(fmtTarih) || parseExcelDateToISO(rawTarih);
+        if (!dutyDateISO) {
+          if (!sampleUnparsedDate) {
+            sampleUnparsedDate = `"${fmtTarih || rawTarih}"`;
+          }
+          continue;
+        }
+
+        const sinif5 = colIndex.sinif_5 >= 0 ? String(fmtRow[colIndex.sinif_5] ?? '').trim() : '';
+        const sinif6 = colIndex.sinif_6 >= 0 ? String(fmtRow[colIndex.sinif_6] ?? '').trim() : '';
+        const sinif7 = colIndex.sinif_7 >= 0 ? String(fmtRow[colIndex.sinif_7] ?? '').trim() : '';
 
         if (!sinif5 && !sinif6 && !sinif7) continue;
 
         parsedRecords.push({
-          sira: colIndex.sira >= 0 && Number(row[colIndex.sira]) ? Number(row[colIndex.sira]) : parsedRecords.length + 1,
-          hafta: colIndex.hafta >= 0 ? String(row[colIndex.hafta] ?? '').trim() : '',
-          tarih_metin: typeof rawTarih === 'number' ? dutyDateISO : String(rawTarih).trim(),
+          sira: colIndex.sira >= 0 && Number(rawRow[colIndex.sira]) ? Number(rawRow[colIndex.sira]) : parsedRecords.length + 1,
+          hafta: colIndex.hafta >= 0 ? String(fmtRow[colIndex.hafta] ?? '').trim() : '',
+          tarih_metin: formatDisplayDate(fmtTarih || rawTarih, dutyDateISO),
           duty_date: dutyDateISO,
-          gun: colIndex.gun >= 0 ? String(row[colIndex.gun] ?? '').trim() : '',
+          gun: colIndex.gun >= 0 ? String(fmtRow[colIndex.gun] ?? '').trim() : '',
           sinif_5: sinif5,
           sinif_6: sinif6,
           sinif_7: sinif7,
@@ -191,7 +272,11 @@ export default function NobetYonetimPage() {
       }
 
       if (parsedRecords.length === 0) {
-        throw new Error('Excel dosyasında geçerli tarih ve nöbetçi kaydı bulunamadı.');
+        throw new Error(
+          `Excel dosyasında geçerli tarih ve nöbetçi kaydı bulunamadı.${
+            sampleUnparsedDate ? ` (Okunan örnek tarih hücresi: ${sampleUnparsedDate})` : ''
+          }`
+        );
       }
 
       if (replaceExisting) {
@@ -243,7 +328,6 @@ export default function NobetYonetimPage() {
 
   return (
     <div className="p-6 lg:p-8 space-y-6 max-w-7xl mx-auto antialiased">
-      {/* Üst Başlık */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-200">
         <div>
           <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Personel Paneli</span>
@@ -269,7 +353,6 @@ export default function NobetYonetimPage() {
         </div>
       )}
 
-      {/* Excel Yükleme & Örnek Şablon Kartı */}
       <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-2xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div className="space-y-1.5">
           <h2 className="text-sm font-black text-slate-900">Excel ile Nöbet Listesi Yükle / Güncelle</h2>
@@ -315,7 +398,6 @@ export default function NobetYonetimPage() {
         </div>
       </div>
 
-      {/* Yüklü Nöbet Çizelgesi Önizleme */}
       <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-2xs">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-xs font-black uppercase tracking-wider text-slate-700">

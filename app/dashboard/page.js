@@ -23,7 +23,7 @@ export default function DashboardPage() {
   });
   const [impendingReturns, setImpendingReturns] = useState([]);
   const [recentActivities, setRecentActivities] = useState([]);
-  
+
   // İlk 3 Öğrenci & İlk 3 Sınıf Listeleri
   const [leaders, setLeaders] = useState({
     monthTopStudentsBooks: [],
@@ -271,7 +271,6 @@ export default function DashboardPage() {
       ? leaders.termTopClassesBooks
       : leaders.termTopClassesPages;
 
-  // Yükleme durumu
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4">
@@ -281,9 +280,6 @@ export default function DashboardPage() {
     );
   }
 
-  // =========================================================================
-  // OTURUM YOKSA: ÇİFT KAPILI KARŞILAMA VE GİRİŞ PORTALI
-  // =========================================================================
   if (!user) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 antialiased selection:bg-indigo-500 selection:text-white relative overflow-hidden font-sans">
@@ -304,7 +300,6 @@ export default function DashboardPage() {
             <p className="text-xs text-slate-400">Lütfen giriş yapmak istediğiniz portalı seçin</p>
           </div>
 
-          {/* 🎓 ÖĞRENCİ GİRİŞİ BÖLÜMÜ */}
           {savedStudent ? (
             <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-2xl p-4 flex items-center justify-between gap-3 shadow-lg text-left">
               <div className="min-w-0">
@@ -346,7 +341,6 @@ export default function DashboardPage() {
             <div className="border-t border-slate-800 w-full"></div>
           </div>
 
-          {/* 🔐 PERSONEL & YÖNETİCİ GİRİŞ BUTONU */}
           <div className="space-y-3">
             <Link
               href="/login"
@@ -370,9 +364,6 @@ export default function DashboardPage() {
     );
   }
 
-  // =========================================================================
-  // OTURUM AÇIKSA: YÖNETİCİ & ÖĞRETMEN DASHBOARD'U
-  // =========================================================================
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-slate-900/5 antialiased text-slate-800">
       {/* Üst Command Bar */}
@@ -392,7 +383,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Personel Durum Rozeti & Çıkış */}
           {user && (
             <div className="flex items-center gap-2 bg-white/90 border border-slate-200/90 px-3 py-1.5 rounded-2xl shadow-2xs">
               <div className="w-6 h-6 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-xs shadow-inner">
@@ -422,7 +412,6 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Dönem Filtre Kapsülleri */}
           <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
             <button
               onClick={() => setPeriod('term')}
@@ -454,7 +443,6 @@ export default function DashboardPage() {
 
       {/* Dashboard Gövdesi */}
       <div className="p-6 lg:p-8 space-y-6 max-w-7xl">
-        
         {/* 1. KISIM: 4'lü Bento Metrik Kartları */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="relative overflow-hidden bg-white/80 backdrop-blur-md p-5 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
@@ -510,8 +498,8 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* 2. KISIM: 4'LÜ HIZLI İŞLEMLER MENÜSÜ */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* 2. KISIM: HIZLI İŞLEMLER MENÜSÜ (NÖBET LİSTESİ DAHİL) */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           <Link
             href="/odunc-ver"
             className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
@@ -561,6 +549,19 @@ export default function DashboardPage() {
             <div>
               <h4 className="text-xs font-black text-slate-900 group-hover:text-amber-600 transition">Barkod Bas</h4>
               <p className="text-[11px] text-slate-400">Kitap & Sırt Etiketi</p>
+            </div>
+          </Link>
+
+          <Link
+            href="/nobet"
+            className="bg-white/80 hover:bg-white backdrop-blur-md p-4 rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-md transition-all flex items-center gap-3.5 group"
+          >
+            <div className="w-11 h-11 rounded-2xl bg-indigo-50 group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white flex items-center justify-center text-xl transition-all shadow-2xs">
+              🛡️
+            </div>
+            <div>
+              <h4 className="text-xs font-black text-slate-900 group-hover:text-indigo-600 transition">Nöbet Listesi</h4>
+              <p className="text-[11px] text-slate-400">Excel Yükle & Pano</p>
             </div>
           </Link>
         </div>
@@ -636,7 +637,6 @@ export default function DashboardPage() {
 
         {/* 4. KISIM: Canlı Akış & LİDERLİK PANOSU */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          
           {/* SOL: Canlı Kütüphane Akışı */}
           <div className="lg:col-span-7 bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
@@ -690,7 +690,6 @@ export default function DashboardPage() {
 
           {/* SAĞ: LİDERLİK PANOSU */}
           <div className="lg:col-span-5 bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.03)] p-6 flex flex-col justify-between space-y-5">
-            
             <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200/80 text-[11px] font-bold">
                 <button
@@ -875,11 +874,8 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
-
           </div>
-
         </div>
-
       </div>
     </div>
   );

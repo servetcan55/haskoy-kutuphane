@@ -48,6 +48,12 @@ const DEFAULT_SLOTS = [
   { id: 'slot6', name: '5. Teneffüs', start: '14:05', end: '14:20' },
 ];
 
+function getLocalDateISO() {
+  const now = new Date();
+  const offsetMs = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - offsetMs).toISOString().split('T')[0];
+}
+
 // WMO Hava Durumu Kodu Çözümleyici & Kütüphane Mesajları
 const getWeatherDetails = (code) => {
   if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code)) {
@@ -85,6 +91,10 @@ export default function LibraryKioskPage() {
   const [currentDayKey, setCurrentDayKey] = useState('wednesday');
   const [currentDayName, setCurrentDayName] = useState('Çarşamba');
   const [qrOrigin, setQrOrigin] = useState('');
+
+  // Günün 3 Nöbetçisi State'leri
+  const [todayDuty, setTodayDuty] = useState(null);
+  const [isUpcomingDuty, setIsUpcomingDuty] = useState(false);
 
   // Canik / Samsun Hava Durumu
   const [weather, setWeather] = useState({
@@ -131,7 +141,6 @@ export default function LibraryKioskPage() {
 
   const academic = getAcademicInfo();
 
-  // Dinamik Origin URL'sini al
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setQrOrigin(window.location.origin);
@@ -210,6 +219,41 @@ export default function LibraryKioskPage() {
     return () => clearInterval(weatherTimer);
   }, []);
 
+  // Günün 3 Nöbetçisini Çekme
+  const loadTodayDuty = async () => {
+    try {
+      const todayISO = getLocalDateISO();
+      const { data: exactDuty } = await supabase
+        .from('library_duties')
+        .select('*')
+        .eq('duty_date', todayISO)
+        .maybeSingle();
+
+      if (exactDuty) {
+        setTodayDuty(exactDuty);
+        setIsUpcomingDuty(false);
+        return;
+      }
+
+      const { data: upcomingDuty } = await supabase
+        .from('library_duties')
+        .select('*')
+        .gte('duty_date', todayISO)
+        .order('duty_date', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (upcomingDuty) {
+        setTodayDuty(upcomingDuty);
+        setIsUpcomingDuty(true);
+      } else {
+        setTodayDuty(null);
+      }
+    } catch (err) {
+      console.error('Nöbet verisi alınamadı:', err);
+    }
+  };
+
   // Alt Bant Döngüsü: Günün Sözü ⇄ Hava Durumu (10 Saniyede Bir)
   useEffect(() => {
     const tickerTimer = setInterval(() => {
@@ -240,6 +284,8 @@ export default function LibraryKioskPage() {
   // Supabase Verilerini Yükleme
   const loadKioskData = async () => {
     try {
+      await loadTodayDuty();
+
       const [booksCountRes, booksRes, studentsRes, loansRes, goalRes, pageGoalRes, quotesRes, scheduleRes] = await Promise.all([
         supabase.from('books').select('*', { count: 'exact', head: true }),
         supabase.from('books').select('*').limit(100),
@@ -332,7 +378,6 @@ export default function LibraryKioskPage() {
         }
       });
 
-      // Bireysel Sıralamalar
       const topStudentsByBooks = Object.entries(studentStats)
         .map(([sId, data]) => {
           const st = students.find((s) => String(s.id) === String(sId));
@@ -365,7 +410,6 @@ export default function LibraryKioskPage() {
         .sort((a, b) => b.pageCount - a.pageCount || b.bookCount - a.bookCount)
         .slice(0, 3);
 
-      // Sınıf Sıralamaları
       const topClassesByBooks = Object.entries(classStats)
         .map(([grade, data]) => ({ grade, bookCount: data.bookCount, pageCount: data.pageCount }))
         .sort((a, b) => b.bookCount - a.bookCount || b.pageCount - a.pageCount)
@@ -433,14 +477,13 @@ export default function LibraryKioskPage() {
 
       {/* 1. ÜST HEADER */}
       <header className="grid grid-cols-1 lg:grid-cols-12 items-center gap-3 pb-2 border-b border-slate-800/80 z-20 shrink-0">
-        
         {/* SOL: LOGO & BAŞLIK */}
         <div className="lg:col-span-4 flex items-center gap-3">
           <div className="w-11 h-11 rounded-2xl bg-slate-900 border border-slate-700/80 p-0.5 shadow-xl shrink-0 overflow-hidden flex items-center justify-center">
-            <img 
-              src="/okul-logo.png" 
-              alt="Hasköy Ortaokulu Logosu" 
-              className="w-full h-full object-contain rounded-[14px]" 
+            <img
+              src="/okul-logo.png"
+              alt="Hasköy Ortaokulu Logosu"
+              className="w-full h-full object-contain rounded-[14px]"
             />
           </div>
           <div className="min-w-0">
@@ -490,7 +533,6 @@ export default function LibraryKioskPage() {
         {/* SAĞ: ZAMAN & CANİK CANLI HAVA DURUMU WIDGET'I */}
         <div className="lg:col-span-4 flex justify-end">
           <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl p-1.5 pl-3 flex items-center gap-2.5 shadow-xl">
-            {/* Canik Canlı Hava Rozeti */}
             <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 px-2 py-1 rounded-xl">
               <span className="text-base">{weather.icon}</span>
               <div className="text-left leading-none">
@@ -501,7 +543,6 @@ export default function LibraryKioskPage() {
               </div>
             </div>
 
-            {/* Tarih ve Dönem */}
             <div className="text-right">
               <div className="flex items-center justify-end gap-1 mb-0.5">
                 <span className="text-[10px] font-extrabold text-blue-400 bg-blue-950/80 border border-blue-500/30 px-1.5 py-0.2 rounded uppercase tracking-wider">
@@ -516,20 +557,16 @@ export default function LibraryKioskPage() {
               </p>
             </div>
 
-            {/* Dijital Saat */}
             <div className="h-10 px-2.5 bg-slate-950/90 border border-slate-800 rounded-xl flex items-center justify-center font-mono text-lg font-black text-emerald-400 tracking-wider shadow-inner">
               {currentTime || '00:00:00'}
             </div>
           </div>
         </div>
-
       </header>
 
       {/* 2. DÖNEMLİK KİTAP & SAYFA SEFERBERLİĞİ BARLARI */}
       <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-800/90 rounded-2xl p-2.5 my-1.5 z-10 shadow-2xl shrink-0">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 divide-y lg:divide-y-0 lg:divide-x divide-slate-800/80">
-          
-          {/* Kitap Hedefi */}
           <div className="flex flex-col justify-between gap-1.5 lg:pr-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -558,7 +595,6 @@ export default function LibraryKioskPage() {
             </div>
           </div>
 
-          {/* Sayfa Rekoru */}
           <div className="flex flex-col justify-between gap-1.5 pt-2 lg:pt-0 lg:pl-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -586,17 +622,13 @@ export default function LibraryKioskPage() {
               </div>
             </div>
           </div>
-
         </div>
       </div>
 
-      {/* 3. ORTA BÖLÜM: 3 SÜTUN EŞİT BÖLÜNMÜŞ (TAM SİMETRİ) */}
-      <main className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-3 my-1 z-10">
-        
-        {/* SOL SÜTUN (4 KOLON): 1. KİTAP KURTLARI + 2. SAYFA ŞAMPİYONLARI */}
-        <div className="lg:col-span-4 grid grid-rows-2 gap-3 h-full min-h-0">
-          
-          {/* 1A: AYIN KİTAP KURTLARI */}
+      {/* 3. ORTA BÖLÜM: 4 SÜTUN SİMETRİK DÜZEN */}
+      <main className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-2.5 my-1 z-10">
+        {/* 1. SÜTUN (3 KOLON): KİTAP KURTLARI + SAYFA ŞAMPİYONLARI */}
+        <div className="lg:col-span-3 grid grid-rows-2 gap-2.5 h-full min-h-0">
           <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-3 flex flex-col justify-between shadow-xl min-h-0">
             <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/60 shrink-0">
               <div className="flex items-center gap-1.5">
@@ -604,7 +636,7 @@ export default function LibraryKioskPage() {
                 <h2 className="text-xs font-black text-white tracking-tight">Ayın Kitap Kurtları</h2>
               </div>
               <span className="text-[9px] font-bold text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full uppercase">
-                Kitap Sıralaması
+                Kitap
               </span>
             </div>
 
@@ -623,7 +655,7 @@ export default function LibraryKioskPage() {
                         : 'bg-slate-900/50 border-amber-700/30'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
                       <span className="text-base shrink-0">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>
                       <div className="min-w-0">
                         <h4 className="font-black text-xs text-white truncate">{st.name}</h4>
@@ -640,7 +672,6 @@ export default function LibraryKioskPage() {
             </div>
           </div>
 
-          {/* 1B: SAYFA ŞAMPİYONLARI */}
           <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-3 flex flex-col justify-between shadow-xl min-h-0">
             <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/60 shrink-0">
               <div className="flex items-center gap-1.5">
@@ -648,7 +679,7 @@ export default function LibraryKioskPage() {
                 <h2 className="text-xs font-black text-white tracking-tight">Sayfa Şampiyonları</h2>
               </div>
               <span className="text-[9px] font-bold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2 py-0.5 rounded-full uppercase">
-                Sayfa Sıralaması
+                Sayfa
               </span>
             </div>
 
@@ -667,7 +698,7 @@ export default function LibraryKioskPage() {
                         : 'bg-slate-900/50 border-amber-700/30'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
                       <span className="text-base shrink-0">{idx === 0 ? '👑' : idx === 1 ? '🥈' : '🥉'}</span>
                       <div className="min-w-0">
                         <h4 className="font-black text-xs text-white truncate">{st.name}</h4>
@@ -683,25 +714,18 @@ export default function LibraryKioskPage() {
               )}
             </div>
           </div>
-
         </div>
 
-        {/* ORTA SÜTUN (4 KOLON): 1. SINIFLAR (KİTAP) + 2. SINIFLAR (SAYFA) */}
-        <div className="lg:col-span-4 grid grid-rows-2 gap-3 h-full min-h-0">
-          
-          {/* 2A: LİDER SINIFLAR (KİTAP LİGİ) */}
+        {/* 2. SÜTUN (3 KOLON): LİDER SINIFLAR (KİTAP + SAYFA) */}
+        <div className="lg:col-span-3 grid grid-rows-2 gap-2.5 h-full min-h-0">
           <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-3 flex flex-col justify-between shadow-xl min-h-0">
             <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/60 shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-rose-600 to-amber-500 text-white flex items-center justify-center shrink-0">
-                  <svg className="w-3 h-3 fill-current" viewBox="0 0 24 24">
-                    <path d="M12 2c-.6 1.4-1.5 2.5-1.5 3.5 0 1.1.9 2 2 2s2-.9 2-2c0-1-.9-2.1-1.5-3.5h-1zM4 19.5c0-.8.7-1.5 1.5-1.5H11v-9.5c-1.5-.7-3.4-1-5.5-1-2.4 0-4.5.5-5.5 1v11.3c0 .4.3.7.7.7.3 0 .6-.1.8-.3 1.1-.5 2.6-.7 4-.7zm16 0c1.4 0 2.9.2 4 .7.2.2.5.3.8.3.4 0 .7-.3.7-.7V7.5c-1-.5-3.1-1-5.5-1-2.1 0-4 .3-5.5 1V18h5.5c.8 0 1.5.7 1.5 1.5z" />
-                  </svg>
-                </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">🏫</span>
                 <h3 className="text-xs font-black text-white tracking-tight">Lider Sınıflar (Kitap)</h3>
               </div>
               <span className="text-[9px] font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
-                Şube Kitap
+                Kitap
               </span>
             </div>
 
@@ -724,19 +748,14 @@ export default function LibraryKioskPage() {
             </div>
           </div>
 
-          {/* 2B: LİDER SINIFLAR (SAYFA LİGİ) */}
           <div className="bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 rounded-3xl p-3 flex flex-col justify-between shadow-xl min-h-0">
             <div className="flex items-center justify-between pb-1.5 border-b border-slate-800/60 shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-emerald-600 to-teal-400 text-white flex items-center justify-center shrink-0">
-                  <svg className="w-3 h-3 fill-current" viewBox="0 0 24 24">
-                    <path d="M12 2c-.6 1.4-1.5 2.5-1.5 3.5 0 1.1.9 2 2 2s2-.9 2-2c0-1-.9-2.1-1.5-3.5h-1zM4 19.5c0-.8.7-1.5 1.5-1.5H11v-9.5c-1.5-.7-3.4-1-5.5-1-2.4 0-4.5.5-5.5 1v11.3c0 .4.3.7.7.7.3 0 .6-.1.8-.3 1.1-.5 2.6-.7 4-.7zm16 0c1.4 0 2.9.2 4 .7.2.2.5.3.8.3.4 0 .7-.3.7-.7V7.5c-1-.5-3.1-1-5.5-1-2.1 0-4 .3-5.5 1V18h5.5c.8 0 1.5.7 1.5 1.5z" />
-                  </svg>
-                </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">📊</span>
                 <h3 className="text-xs font-black text-white tracking-tight">Lider Sınıflar (Sayfa)</h3>
               </div>
               <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                Şube Sayfa
+                Sayfa
               </span>
             </div>
 
@@ -758,77 +777,66 @@ export default function LibraryKioskPage() {
               )}
             </div>
           </div>
-
         </div>
 
-        {/* SAĞ SÜTUN (4 KOLON): TENEFFÜS PROGRAMI + KÜLTÜR VİTRİNİ & QR */}
-        <div className="lg:col-span-4 grid grid-rows-2 gap-3 h-full min-h-0">
-          
-          {/* 3A: SAĞ ÜST KUTU: GÜNÜN TENEFFÜS PROGRAMI */}
-          <div className="bg-gradient-to-br from-indigo-950/80 via-slate-900/90 to-blue-950/70 backdrop-blur-xl border border-indigo-500/30 rounded-3xl p-3 flex flex-col justify-between shadow-xl min-h-0 overflow-hidden">
-            <div className="flex items-center justify-between pb-1 border-b border-indigo-500/20 shrink-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm">📅</span>
-                <h3 className="text-xs font-black text-white tracking-tight">
-                  {currentDayName} Kütüphane Teneffüs Programı
+        {/* 3. SÜTUN (3 KOLON): GÜNÜN 3 NÖBETÇİSİ + KÜLTÜR VİTRİNİ & QR */}
+        <div className="lg:col-span-3 grid grid-rows-2 gap-2.5 h-full min-h-0">
+          {/* 3A: GÜNÜN KÜTÜPHANE NÖBETÇİLERİ (5, 6, 7. SINIF) */}
+          <div className="bg-gradient-to-br from-emerald-950/70 via-slate-900/90 to-slate-950/90 backdrop-blur-xl border border-emerald-500/30 rounded-3xl p-3 flex flex-col justify-between shadow-xl min-h-0 overflow-hidden">
+            <div className="flex items-center justify-between pb-1.5 border-b border-emerald-500/20 shrink-0 gap-1">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-sm shrink-0">🛡️</span>
+                <h3 className="text-xs font-black text-white tracking-tight truncate">
+                  {isUpcomingDuty ? 'Sıradaki Nöbetçiler' : 'Günün Nöbetçileri'}
                 </h3>
               </div>
-              <span className="text-[9px] font-extrabold text-cyan-300 bg-cyan-950/90 border border-cyan-500/40 px-2 py-0.2 rounded-full uppercase">
-                Bugün
+              <span className="text-[9px] font-extrabold text-emerald-300 bg-emerald-950/90 border border-emerald-500/40 px-2 py-0.5 rounded-full uppercase shrink-0">
+                {todayDuty ? (todayDuty.tarih_metin || todayDuty.gun) : '3 Kişi'}
               </span>
             </div>
 
-            <div className="flex-1 flex flex-col justify-between py-1 min-h-0 gap-0.5">
-              {slots.map((s) => {
-                const assigned = todaysSchedule[s.id];
-                const isCurrent = activeSlotInfo?.id === s.id && activeSlotInfo?.isNow;
-                return (
-                  <div
-                    key={s.id}
-                    className={`px-2 py-0.5 rounded-lg border flex items-center justify-between transition-all ${
-                      isCurrent
-                        ? 'bg-emerald-950/90 border-emerald-500/70 text-white shadow-xs'
-                        : 'bg-slate-900/60 border-slate-800/80 text-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                          isCurrent ? 'bg-emerald-400 animate-ping' : 'bg-indigo-400'
-                        }`}
-                      ></span>
-                      <span className="text-[10px] font-bold text-slate-300 shrink-0">
-                        {s.name}:
-                      </span>
-                      <span
-                        className={`truncate text-xs font-black px-1.5 py-0.2 rounded ${
-                          isCurrent
-                            ? 'text-emerald-300 bg-emerald-900/50 border border-emerald-500/40'
-                            : 'text-amber-300 bg-amber-400/10 border border-amber-400/20'
-                        }`}
-                      >
-                        {assigned || 'Serbest Ziyaret'}
-                      </span>
-                    </div>
+            {todayDuty ? (
+              <div className="flex-1 flex flex-col justify-center gap-1.5 py-1 min-h-0">
+                <div className="px-2.5 py-1.5 rounded-xl bg-slate-900/80 border border-blue-500/30 flex items-center justify-between gap-2">
+                  <span className="text-[9px] font-black uppercase text-blue-300 bg-blue-950/90 px-1.5 py-0.5 rounded border border-blue-500/30 shrink-0">
+                    5. Sınıf
+                  </span>
+                  <span className="text-xs font-extrabold text-white truncate">
+                    {todayDuty.sinif_5 || 'Atanmadı'}
+                  </span>
+                </div>
 
-                    <div className="flex items-center gap-1 font-mono text-xs font-black text-cyan-300 bg-slate-950/90 px-2 py-0.5 rounded-md border border-slate-700/80 shrink-0 shadow-inner tracking-wide ml-1.5">
-                      <span>{s.start}</span>
-                      <span className="text-slate-500 font-normal">-</span>
-                      <span>{s.end}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                <div className="px-2.5 py-1.5 rounded-xl bg-slate-900/80 border border-emerald-500/30 flex items-center justify-between gap-2">
+                  <span className="text-[9px] font-black uppercase text-emerald-300 bg-emerald-950/90 px-1.5 py-0.5 rounded border border-emerald-500/30 shrink-0">
+                    6. Sınıf
+                  </span>
+                  <span className="text-xs font-extrabold text-white truncate">
+                    {todayDuty.sinif_6 || 'Atanmadı'}
+                  </span>
+                </div>
+
+                <div className="px-2.5 py-1.5 rounded-xl bg-slate-900/80 border border-amber-500/30 flex items-center justify-between gap-2">
+                  <span className="text-[9px] font-black uppercase text-amber-300 bg-amber-950/90 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0">
+                    7. Sınıf
+                  </span>
+                  <span className="text-xs font-extrabold text-white truncate">
+                    {todayDuty.sinif_7 || 'Atanmadı'}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-2">
+                <p className="text-xs text-slate-400">Aktif nöbet çizelgesi bulunamadı.</p>
+              </div>
+            )}
           </div>
 
-          {/* 3B: SAĞ ALT KUTU: KÜLTÜR VİTRİNİ + QR */}
+          {/* 3B: KÜLTÜR VİTRİNİ + QR */}
           <div className="bg-slate-900/70 backdrop-blur-xl border border-indigo-500/30 rounded-3xl p-3 flex flex-col justify-between shadow-xl min-h-0 overflow-hidden">
-            {/* Üst: Vitrin Başlığı ve Döngü Butonları */}
             <div className="flex items-center justify-between pb-1 border-b border-indigo-500/20 shrink-0">
               <span className="text-[10px] font-black text-amber-300 uppercase tracking-wider flex items-center gap-1">
                 <span>{cultureMode === 'book' ? '⭐' : cultureMode === 'author' ? '✍️' : '📌'}</span>
-                {cultureMode === 'book' ? 'Tavsiye Eser' : cultureMode === 'author' ? 'Haftanın Yazarı' : 'Kütüphane Hatırlatması'}
+                {cultureMode === 'book' ? 'Tavsiye Eser' : cultureMode === 'author' ? 'Haftanın Yazarı' : 'Kural'}
               </span>
 
               <div className="flex items-center gap-1 text-[8px] font-bold">
@@ -856,28 +864,20 @@ export default function LibraryKioskPage() {
               </div>
             </div>
 
-            {/* Orta: İçerik */}
             <div className="flex-1 flex items-center min-h-0 py-1">
               {cultureMode === 'book' && (
                 activeRecBook ? (
                   <div className="flex items-center gap-2.5 w-full animate-in fade-in duration-500">
                     {activeRecBook.cover_url ? (
-                      <img src={activeRecBook.cover_url} alt="" className="w-10 h-15 object-cover rounded-xl border border-indigo-400/30 shadow-md shrink-0" />
+                      <img src={activeRecBook.cover_url} alt="" className="w-9 h-13 object-cover rounded-xl border border-indigo-400/30 shadow-md shrink-0" />
                     ) : (
-                      <div className="w-10 h-15 rounded-xl bg-indigo-900/40 border border-indigo-500/30 flex items-center justify-center text-xl shrink-0">📖</div>
+                      <div className="w-9 h-13 rounded-xl bg-indigo-900/40 border border-indigo-500/30 flex items-center justify-center text-lg shrink-0">📖</div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1">
-                        <h3 className="text-xs font-black text-white truncate">{activeRecBook.title}</h3>
-                        {activeRecBook.page_count && (
-                          <span className="text-[8px] font-mono text-indigo-300 bg-indigo-950 px-1 rounded border border-indigo-500/30 shrink-0">
-                            {activeRecBook.page_count} sf.
-                          </span>
-                        )}
-                      </div>
+                      <h3 className="text-xs font-black text-white truncate">{activeRecBook.title}</h3>
                       <p className="text-[10px] text-indigo-200/90 font-medium truncate mt-0.5">{activeRecBook.author}</p>
                       <p className="text-[9px] text-slate-300/80 mt-0.5 line-clamp-2 italic leading-tight">
-                        {activeRecBook.description || 'Kütüphanemizde mutlaka okunması gereken akıcı ve değerli bir eser.'}
+                        {activeRecBook.description || 'Kütüphanemizde mutlaka okunması gereken akıcı bir eser.'}
                       </p>
                     </div>
                   </div>
@@ -888,16 +888,11 @@ export default function LibraryKioskPage() {
 
               {cultureMode === 'author' && (
                 <div className="flex items-center gap-2.5 w-full animate-in fade-in duration-500">
-                  <div className="w-10 h-14 rounded-2xl bg-indigo-900/60 border border-indigo-400/30 flex items-center justify-center text-2xl shrink-0 shadow">
+                  <div className="w-9 h-13 rounded-2xl bg-indigo-900/60 border border-indigo-400/30 flex items-center justify-center text-xl shrink-0 shadow">
                     {activeAuthor.icon}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <h4 className="text-xs font-black text-white truncate">{activeAuthor.name}</h4>
-                      <span className="text-[8px] font-bold text-purple-300 bg-purple-500/20 px-1 rounded">
-                        {activeAuthor.era}
-                      </span>
-                    </div>
+                    <h4 className="text-xs font-black text-white truncate">{activeAuthor.name}</h4>
                     <p className="text-[9px] text-slate-300 line-clamp-2 mt-0.5 leading-snug">
                       {activeAuthor.desc}
                     </p>
@@ -907,7 +902,7 @@ export default function LibraryKioskPage() {
 
               {cultureMode === 'tip' && (
                 <div className="flex items-center gap-2.5 w-full animate-in fade-in duration-500">
-                  <div className="w-10 h-14 rounded-2xl bg-emerald-900/40 border border-emerald-400/30 flex items-center justify-center text-2xl shrink-0 shadow">
+                  <div className="w-9 h-13 rounded-2xl bg-emerald-900/40 border border-emerald-400/30 flex items-center justify-center text-xl shrink-0 shadow">
                     {activeTip.icon}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -920,10 +915,9 @@ export default function LibraryKioskPage() {
               )}
             </div>
 
-            {/* Alt: QR Kodu */}
-            <div className="pt-1.5 border-t border-indigo-500/20 flex items-center justify-between gap-2.5 shrink-0 bg-slate-950/40 -mx-3 -mb-3 p-2.5 px-3">
+            <div className="pt-1.5 border-t border-indigo-500/20 flex items-center justify-between gap-2 shrink-0 bg-slate-950/40 -mx-3 -mb-3 p-2 px-3">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="w-8 h-8 bg-white p-0.5 rounded-lg shrink-0 flex items-center justify-center shadow-md">
+                <div className="w-7 h-7 bg-white p-0.5 rounded-lg shrink-0 flex items-center justify-center shadow-md">
                   <img
                     src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&margin=0&data=${encodeURIComponent(studentPortalUrl)}`}
                     alt="Öğrenci Portalı QR Kodu"
@@ -935,23 +929,76 @@ export default function LibraryKioskPage() {
                     📱 Cep Kütüphanem
                   </span>
                   <span className="text-[8px] text-slate-300 block truncate mt-0.5">
-                    Kitap ara • İade gününü gör
+                    Kitap ara • İade gör
                   </span>
                 </div>
               </div>
 
               <Link
                 href="/ogrenci"
-                className="text-[8px] font-black text-cyan-300 bg-cyan-950/80 border border-cyan-500/40 px-2 py-1 rounded-md shrink-0 hover:bg-cyan-900 transition flex items-center gap-0.5"
+                className="text-[8px] font-black text-cyan-300 bg-cyan-950/80 border border-cyan-500/40 px-1.5 py-1 rounded-md shrink-0 hover:bg-cyan-900 transition"
               >
-                <span>/ogrenci</span>
-                <span>→</span>
+                /ogrenci →
               </Link>
             </div>
           </div>
-
         </div>
 
+        {/* 4. SÜTUN (3 KOLON): GÜNÜN TENEFFÜS PROGRAMI */}
+        <div className="lg:col-span-3 bg-gradient-to-br from-indigo-950/80 via-slate-900/90 to-blue-950/70 backdrop-blur-xl border border-indigo-500/30 rounded-3xl p-3 flex flex-col justify-between shadow-xl h-full min-h-0 overflow-hidden">
+          <div className="flex items-center justify-between pb-1.5 border-b border-indigo-500/20 shrink-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-sm shrink-0">📅</span>
+              <h3 className="text-xs font-black text-white tracking-tight truncate">
+                {currentDayName} Teneffüs Programı
+              </h3>
+            </div>
+            <span className="text-[9px] font-extrabold text-cyan-300 bg-cyan-950/90 border border-cyan-500/40 px-2 py-0.5 rounded-full uppercase shrink-0">
+              Bugün
+            </span>
+          </div>
+
+          <div className="flex-1 flex flex-col justify-between py-1 min-h-0 gap-1">
+            {slots.map((s) => {
+              const assigned = todaysSchedule[s.id];
+              const isCurrent = activeSlotInfo?.id === s.id && activeSlotInfo?.isNow;
+              return (
+                <div
+                  key={s.id}
+                  className={`px-2 py-1 rounded-xl border flex items-center justify-between gap-1.5 transition-all ${
+                    isCurrent
+                      ? 'bg-emerald-950/90 border-emerald-500/70 text-white shadow-xs'
+                      : 'bg-slate-900/60 border-slate-800/80 text-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        isCurrent ? 'bg-emerald-400 animate-ping' : 'bg-indigo-400'
+                      }`}
+                    ></span>
+                    <span className="text-[10px] font-bold text-slate-300 shrink-0">
+                      {s.name}:
+                    </span>
+                    <span
+                      className={`truncate text-[11px] font-black px-1.5 py-0.5 rounded ${
+                        isCurrent
+                          ? 'text-emerald-300 bg-emerald-900/50 border border-emerald-500/40'
+                          : 'text-amber-300 bg-amber-400/10 border border-amber-400/20'
+                      }`}
+                    >
+                      {assigned || 'Serbest'}
+                    </span>
+                  </div>
+
+                  <span className="font-mono text-[10px] font-black text-cyan-300 bg-slate-950/90 px-1.5 py-0.5 rounded-md border border-slate-700/80 shrink-0">
+                    {s.start}-{s.end}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </main>
 
       {/* 4. DİNAMİK GÜNÜN SÖZÜ & CANLI HAVA DURUMU BANDI */}
